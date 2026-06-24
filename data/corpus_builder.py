@@ -1,81 +1,275 @@
-# data/corpus_builder.py — Builds the RAG knowledge base
-# Run: python3 data/corpus_builder.py
-# Output: data/corpus/corpus_chunks.json (ready for ChromaDB in Week 2)
+"""
+SafetyIQ — RAG corpus builder
 
-import json, os, sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+Builds the incident + regulatory knowledge base that the RAG agent queries.
 
-CORPUS = [
+Week 1 task: run this to generate the synthetic corpus.
+Week 2 task: replace synthetic docs with real PDFs from DGFASLI, OISD, DGMS.
+
+Real sources to download (all public):
+  • DGFASLI annual reports: https://dgfasli.gov.in/en/annual-reports
+  • OISD standards (GS-1, STD-105, STD-118): https://oisd.gov.in/standards
+  • DGMS circulars: https://dgms.gov.in/circulars
+  • CPCB industrial accident reports: https://cpcb.nic.in
+
+Run:  python3 corpus_builder.py --output data/corpus/
+"""
+
+import json
+import random
+from datetime import datetime, timedelta
+from pathlib import Path
+
+
+# ── Synthetic incident corpus ──────────────────────────────────────────────────
+# These are fictionalised but technically accurate incident reports.
+# Replace with real DGFASLI PDFs in Week 2 using PyMuPDF or pdfplumber.
+
+INCIDENT_TEMPLATES = [
     {
-        "id": "INC-001", "type": "incident_report",
-        "title": "Vizag Steel Plant Fatality — January 2025",
-        "source": "DGFASLI Investigation Report 2025-VZG-001",
-        "body": """Eight contract workers died at Rashtriya Ispat Nigam Limited (RINL) Vizag Steel Plant on January 4 2025 during maintenance work in a confined space in the coke oven by-products area. The DGFASLI investigation identified five compounding precursor conditions that co-existed in the 47-minute window before the incident: (1) H2S readings had been elevated above 8 ppm for 47 minutes before worker entry; (2) Sensor G-09 in zone Z-04 had been offline since the previous shift handover, creating a blind spot; (3) A hot work welding permit was active in adjacent zone Z-02, which shares a ventilation path with Z-04; (4) A shift changeover was in progress — the outgoing supervisor had not formally communicated elevated gas readings to the incoming supervisor during the 23-minute handover gap; (5) The confined space pre-entry atmospheric check was not logged in the permit-to-work system for Z-08. No single precursor would have triggered an emergency under standard single-threshold alert systems. Regulatory violations cited: Factory Act 1948 Section 36 (confined space atmospheric test required immediately prior to entry), OISD-GS-1 Clause 6.3 (offline sensor must be logged as safety critical and zone treated as WARNING level), DGFASLI Confined Space SOP Clause 4.2 (PTW must integrate with live SCADA gas monitoring data). The compound interaction of all five precursors created the lethal conditions. A compound risk detection system correlating all five factors would have predicted the breach 47 minutes before the fatalities occurred."""
+        "id": "INC-001",
+        "title": "Coke oven gas leak — confined space fatality, Bhilai Steel Plant, 2019",
+        "date": "2019-08-14",
+        "plant_type": "integrated_steel",
+        "hazard_type": "toxic_gas",
+        "fatalities": 2,
+        "injuries": 4,
+        "root_causes": [
+            "Permit-to-work not cross-checked against live gas readings",
+            "Gas detector G-4 under calibration — blind spot in battery 7",
+            "Shift changeover during confined space entry — communication gap",
+        ],
+        "precursor_signals": [
+            "H2S reading elevated 2.1 ppm above baseline 45 mins prior",
+            "Pressure sensor P-3 showed 1.8 kPa above normal at 22:10",
+            "No pre-entry atmospheric test recorded in PTW-219",
+        ],
+        "regulatory_violations": [
+            "Factory Act S.36(1) — no atmospheric testing before confined space entry",
+            "OISD-GS-1 Clause 6.3 — hot work within 15m of elevated H2S",
+            "DGFASLI OM-2018-04 — PTW not suspended on gas reading change",
+        ],
+        "prevention_actions": [
+            "Real-time PTW cross-check with gas sensor readings",
+            "Automatic PTW suspension when adjacent sensor exceeds warning threshold",
+            "Mandatory re-atmospheric test after any sensor reading change during confined space work",
+        ],
+        "body": (
+            "At 22:47 on 14 August 2019, two contract workers entered an inspection pit "
+            "in Battery 7 at Bhilai Steel Plant under PTW-219, authorised for inspection work. "
+            "Gas detector G-4 in the adjacent bay was under calibration and offline. "
+            "At 22:53, both workers collapsed due to H2S exposure. "
+            "Response teams reached the site at 23:04 but both workers were pronounced dead on arrival at hospital. "
+            "Investigation found H2S had been trending upward for 47 minutes prior to entry, "
+            "visible in the SCADA historian, but no alert was generated because no single sensor "
+            "had yet crossed the 10 ppm threshold. The compound condition — elevated gas, "
+            "offline sensor, active confined space permit, shift changeover — was never assessed holistically."
+        ),
     },
     {
-        "id": "INC-002", "type": "incident_report",
-        "title": "Bhilai Steel Plant CO Gas Leak — November 2022",
-        "source": "DGFASLI Annual Report 2022-23, Incident Reference BHL-2022-118",
-        "body": """A carbon monoxide gas leak at SAIL Bhilai Steel Plant in November 2022 resulted in 14 workers being hospitalised from the blast furnace area. Root cause analysis showed CO levels had been rising for 38 minutes before the single-threshold alarm triggered at 200 ppm IDLH. A hot work permit was active in the same zone during this entire period. When CO reached 180 ppm, automatic alarms triggered — but 14 workers were already in the exposure zone. The compound risk (rising CO + active hot work + no nearby O2 sensor to detect oxygen displacement) would have predicted the breach 38 minutes earlier. The DGFASLI report recommended updating GS-4 standards to require integrated multi-sensor correlation rather than individual threshold alerting. Key technical finding: CO in blast furnace environments rises in a predictable gradient from 25 ppm (baseline) through 50 ppm (OSHA PEL) to 200 ppm (IDLH) over approximately 45 minutes when a furnace seal failure is the source. A system tracking the rate of change and correlating with active work permits could have triggered intervention before any worker reached dangerous exposure."""
+        "id": "INC-002",
+        "title": "Coke oven explosion — gas accumulation during maintenance, Durgapur, 2021",
+        "date": "2021-03-22",
+        "plant_type": "integrated_steel",
+        "hazard_type": "explosion",
+        "fatalities": 3,
+        "injuries": 11,
+        "root_causes": [
+            "Hot work permit active in Zone C while gas pressure in collector main was elevated",
+            "Maintenance team not informed of gas pressure exceedance",
+            "Emergency shutdown procedure not initiated when pressure exceeded 8 kPa",
+        ],
+        "precursor_signals": [
+            "Collector main pressure at 7.8 kPa (warning threshold 7.0) for 32 minutes",
+            "H2S G-07 showing 8.4 ppm — below 10 ppm threshold but above baseline",
+            "PTW-334 (hot work — angle grinding) active in Zone C since 14:30",
+        ],
+        "regulatory_violations": [
+            "OISD-GS-1 Clause 7.1 — hot work not suspended on pressure exceedance",
+            "OISD-STD-105 — gas tightness test not performed before maintenance",
+            "Factory Act S.36(3) — no gas-free certificate for work area",
+        ],
+        "prevention_actions": [
+            "Automatic hot work permit suspension when adjacent pressure sensor exceeds warning",
+            "Real-time gas tightness monitoring during all maintenance activities",
+            "Mandatory zone clearance before any hot work in Zone 1 areas",
+        ],
+        "body": (
+            "On 22 March 2021, an explosion occurred in the coke side quench area of Durgapur Steel Plant "
+            "at 15:47, killing three workers and injuring eleven. "
+            "PTW-334 authorising hot work (angle grinding on a flange) had been active since 14:30. "
+            "At 14:58, collector main pressure exceeded the warning threshold of 7.0 kPa, "
+            "reaching 7.8 kPa. This reading was visible on SCADA but no alert was sent "
+            "to the maintenance team in Zone C. The grinding work continued. "
+            "At 15:47, pressure reached 11.2 kPa and gas accumulated around the work area "
+            "ignited from the grinding sparks. "
+            "Post-incident analysis identified that had the hot work permit been automatically "
+            "cross-checked against the live pressure reading, PTW-334 would have been flagged "
+            "for suspension at 14:58 — 49 minutes before the explosion."
+        ),
     },
     {
-        "id": "INC-003", "type": "incident_report",
-        "title": "HPCL Visakh Refinery Confined Space Fatality — 2021",
-        "source": "OISD Incident Investigation 2021-HPC-07",
-        "body": """Two workers died at HPCL Visakh Refinery in 2021 during tank cleaning operations when O2 levels inside the tank had dropped to 15.2 percent (below the IDLH threshold of 16 percent). The permit-to-work system showed the pre-entry atmospheric check as completed. Investigation found the O2 check was conducted 4 hours before actual entry, not at the time of entry as required by OISD-GS-1 and Factory Act Section 36. The permit-to-work system had no time-validation logic to flag stale entry checks. Key learning: compound risk must account for the temporal validity of safety checks, not just binary completion status. A permit logged 4 hours ago is not equivalent to one logged 15 minutes ago. The regulatory requirement (Factory Act S.36(1)(a)) is that the atmospheric test be conducted by a competent person based on a test carried out by himself immediately prior to entry. OISD-GS-1 Clause 6.4 specifies that pre-entry checks expire after 15 minutes if conditions in the zone have changed."""
+        "id": "INC-003",
+        "title": "Vizag Steel Plant coke oven explosion — 8 fatalities, January 2025",
+        "date": "2025-01-12",
+        "plant_type": "integrated_steel",
+        "hazard_type": "explosion",
+        "fatalities": 8,
+        "injuries": 14,
+        "root_causes": [
+            "No intelligence layer to correlate existing sensor data into compound risk",
+            "Gas detector maintenance created coverage blind spot in Battery 3",
+            "PTW system not integrated with real-time SCADA readings",
+            "Shift changeover incomplete — incoming supervisor not briefed on gas trends",
+            "No pre-entry atmospheric test for workers entering coke side",
+        ],
+        "precursor_signals": [
+            "H2S trending upward in Zone C for 73 minutes before explosion",
+            "Collector main pressure at 8.6 kPa — above warning, below critical",
+            "G-09 offline for calibration — Zone C had reduced sensor coverage",
+            "Hot work permit PTW-047 active for angle grinding in Zone C",
+            "Shift B/C changeover at 22:00 — incoming supervisor not informed of gas trend",
+        ],
+        "regulatory_violations": [
+            "OISD-GS-1 Clause 6.3 and 7.1 — multiple compound violations",
+            "Factory Act S.36(1)(a) — no pre-entry test before Zone C entry",
+            "DGFASLI OM-2023-11 — PTW not reviewed after sensor readings changed",
+        ],
+        "prevention_actions": [
+            "Compound risk engine correlating all sensor, permit, shift, and maintenance data",
+            "Real-time PTW suspension protocol on compound risk threshold breach",
+            "Mandatory shift briefing checklist including live gas trend review",
+            "No hot work in Zone 1 when any adjacent sensor in maintenance/offline state",
+        ],
+        "body": (
+            "On 12 January 2025, eight workers were killed and fourteen injured in an explosion "
+            "at Coke Oven Battery 3, Visakhapatnam Steel Plant. "
+            "An investigation by The Wire found that warning signals from gas pressure sensors existed, "
+            "but no intelligence layer connected those readings to operational decisions in time. "
+            "Five distinct precursor conditions were identifiable in SCADA data up to 73 minutes before the event: "
+            "elevated H2S trending in Zone C, collector main pressure above warning threshold, "
+            "gas detector G-09 offline for calibration, hot work permit PTW-047 active in Zone C, "
+            "and shift changeover completed without a gas trend briefing. "
+            "Each condition was below the threshold for a standalone alert. "
+            "Together, they constituted an imminent explosion risk. "
+            "The SCADA system logged every reading. The intelligence to act on them was absent."
+        ),
     },
-    {
-        "id": "REG-001", "type": "regulatory",
-        "title": "OISD-GS-1 Clauses 6.3 and 6.4 — Toxic Gas Monitoring Requirements",
-        "source": "Oil Industry Safety Directorate, Government of India — General Standard 1",
-        "body": """OISD-GS-1 Clause 6.3 requires all oil, gas, and heavy industrial facilities to install continuous gas monitoring for H2S, CO, and CH4 at all confined spaces, pump houses, and by-product handling areas. Threshold requirements for H2S: 5 ppm caution (notify supervisor), 10 ppm warning (restrict non-essential access), 20 ppm danger (evacuate non-essential personnel, activate emergency response), 50 ppm critical IDLH (full emergency response, do not enter without SCBA). All sensors must be certified to IS 5780 or IECEx standards with calibration every 6 months minimum. Any sensor offline for more than 30 minutes must be logged as a safety critical event and the zone treated as if readings are at the warning threshold until the sensor is restored. Permit-to-work systems must integrate with gas monitoring — no hot work permit shall be approved in any zone where an adjacent zone shows readings above the warning threshold. OISD-GS-1 Clause 6.4 specifies that pre-entry atmospheric checks are valid for a maximum of 15 minutes from the time of testing. If more than 15 minutes elapse between the test and actual confined space entry, or if any plant condition changes (including work activities in adjacent zones), the test must be repeated before entry is permitted."""
-    },
-    {
-        "id": "REG-002", "type": "regulatory",
-        "title": "Factory Act 1948 Section 36 — Confined Space Entry Requirements",
-        "source": "Ministry of Labour and Employment, Government of India",
-        "body": """Factory Act 1948 Section 36 governs precautions regarding dangerous fumes, gases, and confined spaces. Section 36(1) prohibits entry into any confined space where gas, fume, vapour, or dust is likely to be present to an extent involving risk to persons, unless adequate means of egress are provided. Section 36(1)(a) requires that before any person enters a confined space, a certificate in writing must be given by a competent person based on a test carried out by that person confirming the space is reasonably free from dangerous gas, fume, vapour or dust. This test must be conducted immediately prior to entry. Section 36(1)(b) provides the alternative that the entering person must wear suitable breathing apparatus (SCBA) if an atmospheric test cannot confirm safety. Section 36(3) requires that during confined space work, a person must be stationed outside and in communication with the person inside at all times, with authority to raise immediate alarm. The critical operational requirement is that the atmospheric test must be conducted not more than 15 minutes before the worker physically enters the confined space. A permit-to-work system that records an entry check completed 4 hours earlier does not satisfy the requirements of Section 36(1)(a)."""
-    },
-    {
-        "id": "REG-003", "type": "regulatory",
-        "title": "DGFASLI Confined Space SOP Clause 4.2 — PTW Integration Requirements",
-        "source": "Directorate General Factory Advice Service and Labour Institutes — Model Confined Space Entry Procedure",
-        "body": """DGFASLI Model Confined Space Entry Procedure Clause 4.2 specifies permit-to-work integration requirements. The PTW system must: (a) Record atmospheric test results for O2, CO, H2S, and LEL at the actual time of entry; (b) Cross-check with the plant's continuous gas monitoring system — if live sensor readings differ from the pre-entry test by more than 20 percent, entry must be suspended pending investigation; (c) Flag any active permits in adjacent zones where hot work or welding is underway, as these activities can alter atmospheric conditions in connected spaces; (d) Record the shift supervisor who authorised entry — during shift changeovers, entry authorisation must be re-confirmed by the incoming supervisor before work continues; (e) Automatically expire if the worker has not checked in via the entry register within 15 minutes of permit issuance. Digital PTW systems must be integrated with SCADA gas monitoring. Clause 5.2 specifies that hot work permits may not be issued in any zone that shares a ventilation path with a zone showing gas readings above OISD-GS-1 warning thresholds. Clause 6.1 requires that when a shift changeover occurs during active confined space work, the outgoing supervisor must formally brief the incoming supervisor on all atmospheric readings, active permits, and any deviations from normal plant conditions before transferring authority."""
-    }
 ]
 
-def chunk(doc: dict, size: int = 350) -> list[dict]:
-    words = doc["body"].split()
-    step = int(size * 0.8)
+REGULATORY_DOCS = [
+    {
+        "id": "REG-001",
+        "title": "OISD-GS-1: Safety practices for hydrocarbon industries",
+        "source": "Oil Industry Safety Directorate",
+        "type": "standard",
+        "clauses": {
+            "6.3": "Toxic gas monitoring: H2S detectors shall be installed in all areas where H2S concentration may exceed 1 ppm. Hot work shall not be performed when H2S exceeds 5 ppm in the work zone or within 15 metres.",
+            "6.4": "Carbon monoxide monitoring: CO detectors required in all confined spaces. Work shall be suspended when CO exceeds 25 ppm.",
+            "7.1": "Gas pressure management: Hot work permits shall be automatically suspended when collector main pressure exceeds the warning threshold. All permits must be re-validated after any pressure exceedance event.",
+            "5.2": "Explosive atmosphere management: No ignition sources in Zone 1 when CH4 exceeds 10% LEL. Mandatory gas-free certificate before hot work.",
+        },
+    },
+    {
+        "id": "REG-002",
+        "title": "Factory Act 1948 — Sections 36–41: Dangerous operations",
+        "source": "Ministry of Labour and Employment",
+        "type": "legislation",
+        "clauses": {
+            "S.36(1)": "No person shall be required or allowed to enter any confined space in which dangerous fumes are likely to be present unless it has been certified safe by a competent person immediately before entry.",
+            "S.36(1)(a)": "Atmospheric testing for oxygen, flammable, and toxic gases must be performed immediately before entry and documented in the permit-to-work system.",
+            "S.36(3)": "No naked flame or light likely to ignite fumes shall be used in any confined space.",
+            "S.37": "Precautions against explosive or inflammable dust: where explosive dust is liable to be generated, effective measures to prevent accumulation.",
+        },
+    },
+    {
+        "id": "REG-003",
+        "title": "DGFASLI operational manual OM-2023-11: Permit-to-work for chemical hazards",
+        "source": "Directorate General Factory Advice Service & Labour Institutes",
+        "type": "operational_manual",
+        "clauses": {
+            "4.1": "Permit-to-work cross-validation: All PTW systems must be validated against real-time gas monitor readings at the time of issue and at least every 30 minutes during active work.",
+            "4.3": "Automatic suspension trigger: PTW shall be suspended immediately when any gas sensor within 20 metres of the work zone exceeds the warning threshold.",
+            "5.2": "Shift changeover protocol: Incoming shift supervisor must review all active permits and current gas monitor trends before accepting responsibility.",
+            "6.1": "Sensor maintenance: When a gas detector is taken offline for maintenance, no hot work or confined space entry shall be permitted in the coverage area without deployment of a portable backup detector.",
+        },
+    },
+]
+
+
+def build_corpus(output_dir: str = "data/corpus") -> None:
+    """
+    Build the RAG corpus and save as JSON files.
+    In Week 2, extend this to also ingest real PDFs using:
+        pip install pdfplumber
+        import pdfplumber
+        with pdfplumber.open("OISD-GS-1.pdf") as pdf:
+            text = "\n".join(p.extract_text() for p in pdf.pages)
+    """
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    # Save incident corpus
+    incidents_path = out / "incidents.json"
+    with open(incidents_path, "w") as f:
+        json.dump(INCIDENT_TEMPLATES, f, indent=2)
+    print(f"Saved {len(INCIDENT_TEMPLATES)} incidents → {incidents_path}")
+
+    # Save regulatory corpus
+    regs_path = out / "regulations.json"
+    with open(regs_path, "w") as f:
+        json.dump(REGULATORY_DOCS, f, indent=2)
+    print(f"Saved {len(REGULATORY_DOCS)} regulatory docs → {regs_path}")
+
+    # Build flat text chunks for vector embedding (Week 2)
     chunks = []
-    for i, start in enumerate(range(0, len(words), step)):
-        w = words[start:start + size]
-        if len(w) < 40: continue
+    for inc in INCIDENT_TEMPLATES:
         chunks.append({
-            "chunk_id": f"{doc['id']}-chunk-{i:02d}",
-            "parent_id": doc["id"],
-            "type": doc["type"],
-            "title": doc["title"],
-            "source": doc["source"],
-            "text": " ".join(w),
-            "word_count": len(w)
+            "id": f"{inc['id']}_body",
+            "type": "incident_report",
+            "text": inc["body"],
+            "metadata": {
+                "incident_id": inc["id"],
+                "date": inc["date"],
+                "fatalities": inc["fatalities"],
+                "hazard_type": inc["hazard_type"],
+                "precursor_signals": inc["precursor_signals"],
+            },
         })
-    return chunks
+        for i, cause in enumerate(inc["root_causes"]):
+            chunks.append({
+                "id": f"{inc['id']}_cause_{i}",
+                "type": "root_cause",
+                "text": f"Root cause of {inc['title']}: {cause}",
+                "metadata": {"incident_id": inc["id"]},
+            })
+        for action in inc["prevention_actions"]:
+            chunks.append({
+                "id": f"{inc['id']}_prevention",
+                "type": "prevention_action",
+                "text": action,
+                "metadata": {"incident_id": inc["id"]},
+            })
+
+    for reg in REGULATORY_DOCS:
+        for clause_id, text in reg["clauses"].items():
+            chunks.append({
+                "id": f"{reg['id']}_{clause_id}",
+                "type": "regulation",
+                "text": f"{reg['title']} — {clause_id}: {text}",
+                "metadata": {
+                    "reg_id": reg["id"],
+                    "source": reg["source"],
+                    "clause": clause_id,
+                },
+            })
+
+    chunks_path = out / "chunks.json"
+    with open(chunks_path, "w") as f:
+        json.dump(chunks, f, indent=2)
+    print(f"Saved {len(chunks)} text chunks → {chunks_path}")
+    
+
 
 if __name__ == "__main__":
-    out_dir = os.path.join(os.path.dirname(__file__), "corpus")
-    os.makedirs(out_dir, exist_ok=True)
-
-    all_chunks = []
-    for doc in CORPUS:
-        c = chunk(doc)
-        all_chunks.extend(c)
-        print(f"{doc['id']} — {doc['title'][:55]}: {len(c)} chunk(s)")
-
-    path = os.path.join(out_dir, "corpus_chunks.json")
-    with open(path, "w") as f:
-        json.dump(all_chunks, f, indent=2)
-
-    print(f"\nTotal: {len(all_chunks)} chunks from {len(CORPUS)} documents")
-    print(f"Saved → {path}")
-    print("Ready for ChromaDB embedding in Week 2")
+    build_corpus()

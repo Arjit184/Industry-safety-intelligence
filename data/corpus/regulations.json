@@ -1,0 +1,38 @@
+[
+  {
+    "id": "REG-001",
+    "title": "OISD-GS-1: Safety practices for hydrocarbon industries",
+    "source": "Oil Industry Safety Directorate",
+    "type": "standard",
+    "clauses": {
+      "6.3": "Toxic gas monitoring: H2S detectors shall be installed in all areas where H2S concentration may exceed 1 ppm. Hot work shall not be performed when H2S exceeds 5 ppm in the work zone or within 15 metres.",
+      "6.4": "Carbon monoxide monitoring: CO detectors required in all confined spaces. Work shall be suspended when CO exceeds 25 ppm.",
+      "7.1": "Gas pressure management: Hot work permits shall be automatically suspended when collector main pressure exceeds the warning threshold. All permits must be re-validated after any pressure exceedance event.",
+      "5.2": "Explosive atmosphere management: No ignition sources in Zone 1 when CH4 exceeds 10% LEL. Mandatory gas-free certificate before hot work."
+    }
+  },
+  {
+    "id": "REG-002",
+    "title": "Factory Act 1948 \u2014 Sections 36\u201341: Dangerous operations",
+    "source": "Ministry of Labour and Employment",
+    "type": "legislation",
+    "clauses": {
+      "S.36(1)": "No person shall be required or allowed to enter any confined space in which dangerous fumes are likely to be present unless it has been certified safe by a competent person immediately before entry.",
+      "S.36(1)(a)": "Atmospheric testing for oxygen, flammable, and toxic gases must be performed immediately before entry and documented in the permit-to-work system.",
+      "S.36(3)": "No naked flame or light likely to ignite fumes shall be used in any confined space.",
+      "S.37": "Precautions against explosive or inflammable dust: where explosive dust is liable to be generated, effective measures to prevent accumulation."
+    }
+  },
+  {
+    "id": "REG-003",
+    "title": "DGFASLI operational manual OM-2023-11: Permit-to-work for chemical hazards",
+    "source": "Directorate General Factory Advice Service & Labour Institutes",
+    "type": "operational_manual",
+    "clauses": {
+      "4.1": "Permit-to-work cross-validation: All PTW systems must be validated against real-time gas monitor readings at the time of issue and at least every 30 minutes during active work.",
+      "4.3": "Automatic suspension trigger: PTW shall be suspended immediately when any gas sensor within 20 metres of the work zone exceeds the warning threshold.",
+      "5.2": "Shift changeover protocol: Incoming shift supervisor must review all active permits and current gas monitor trends before accepting responsibility.",
+      "6.1": "Sensor maintenance: When a gas detector is taken offline for maintenance, no hot work or confined space entry shall be permitted in the coverage area without deployment of a portable backup detector."
+    }
+  }
+]

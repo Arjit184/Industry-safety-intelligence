@@ -1,0 +1,18 @@
+# ── Week 1 (install now) ──────────────────────────────────────────────
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+websockets>=12.0
+httpx>=0.27.0
+pytest>=8.0.0
+python-dotenv>=1.0.0
+numpy>=1.26.0
+
+# ── Week 2 (uncomment when ready) ────────────────────────────────────
+# chromadb>=0.5.0
+# sentence-transformers>=3.0.0
+# anthropic>=0.34.0
+# pdfplumber>=0.11.0
+
+# ── Week 3 (uncomment when ready) ────────────────────────────────────
+# networkx>=3.3
+# pyvis>=0.3.2
