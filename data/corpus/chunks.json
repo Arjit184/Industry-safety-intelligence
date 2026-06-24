@@ -1,0 +1,340 @@
+[
+  {
+    "id": "INC-001_body",
+    "type": "incident_report",
+    "text": "At 22:47 on 14 August 2019, two contract workers entered an inspection pit in Battery 7 at Bhilai Steel Plant under PTW-219, authorised for inspection work. Gas detector G-4 in the adjacent bay was under calibration and offline. At 22:53, both workers collapsed due to H2S exposure. Response teams reached the site at 23:04 but both workers were pronounced dead on arrival at hospital. Investigation found H2S had been trending upward for 47 minutes prior to entry, visible in the SCADA historian, but no alert was generated because no single sensor had yet crossed the 10 ppm threshold. The compound condition \u2014 elevated gas, offline sensor, active confined space permit, shift changeover \u2014 was never assessed holistically.",
+    "metadata": {
+      "incident_id": "INC-001",
+      "date": "2019-08-14",
+      "fatalities": 2,
+      "hazard_type": "toxic_gas",
+      "precursor_signals": [
+        "H2S reading elevated 2.1 ppm above baseline 45 mins prior",
+        "Pressure sensor P-3 showed 1.8 kPa above normal at 22:10",
+        "No pre-entry atmospheric test recorded in PTW-219"
+      ]
+    }
+  },
+  {
+    "id": "INC-001_cause_0",
+    "type": "root_cause",
+    "text": "Root cause of Coke oven gas leak \u2014 confined space fatality, Bhilai Steel Plant, 2019: Permit-to-work not cross-checked against live gas readings",
+    "metadata": {
+      "incident_id": "INC-001"
+    }
+  },
+  {
+    "id": "INC-001_cause_1",
+    "type": "root_cause",
+    "text": "Root cause of Coke oven gas leak \u2014 confined space fatality, Bhilai Steel Plant, 2019: Gas detector G-4 under calibration \u2014 blind spot in battery 7",
+    "metadata": {
+      "incident_id": "INC-001"
+    }
+  },
+  {
+    "id": "INC-001_cause_2",
+    "type": "root_cause",
+    "text": "Root cause of Coke oven gas leak \u2014 confined space fatality, Bhilai Steel Plant, 2019: Shift changeover during confined space entry \u2014 communication gap",
+    "metadata": {
+      "incident_id": "INC-001"
+    }
+  },
+  {
+    "id": "INC-001_prevention",
+    "type": "prevention_action",
+    "text": "Real-time PTW cross-check with gas sensor readings",
+    "metadata": {
+      "incident_id": "INC-001"
+    }
+  },
+  {
+    "id": "INC-001_prevention",
+    "type": "prevention_action",
+    "text": "Automatic PTW suspension when adjacent sensor exceeds warning threshold",
+    "metadata": {
+      "incident_id": "INC-001"
+    }
+  },
+  {
+    "id": "INC-001_prevention",
+    "type": "prevention_action",
+    "text": "Mandatory re-atmospheric test after any sensor reading change during confined space work",
+    "metadata": {
+      "incident_id": "INC-001"
+    }
+  },
+  {
+    "id": "INC-002_body",
+    "type": "incident_report",
+    "text": "On 22 March 2021, an explosion occurred in the coke side quench area of Durgapur Steel Plant at 15:47, killing three workers and injuring eleven. PTW-334 authorising hot work (angle grinding on a flange) had been active since 14:30. At 14:58, collector main pressure exceeded the warning threshold of 7.0 kPa, reaching 7.8 kPa. This reading was visible on SCADA but no alert was sent to the maintenance team in Zone C. The grinding work continued. At 15:47, pressure reached 11.2 kPa and gas accumulated around the work area ignited from the grinding sparks. Post-incident analysis identified that had the hot work permit been automatically cross-checked against the live pressure reading, PTW-334 would have been flagged for suspension at 14:58 \u2014 49 minutes before the explosion.",
+    "metadata": {
+      "incident_id": "INC-002",
+      "date": "2021-03-22",
+      "fatalities": 3,
+      "hazard_type": "explosion",
+      "precursor_signals": [
+        "Collector main pressure at 7.8 kPa (warning threshold 7.0) for 32 minutes",
+        "H2S G-07 showing 8.4 ppm \u2014 below 10 ppm threshold but above baseline",
+        "PTW-334 (hot work \u2014 angle grinding) active in Zone C since 14:30"
+      ]
+    }
+  },
+  {
+    "id": "INC-002_cause_0",
+    "type": "root_cause",
+    "text": "Root cause of Coke oven explosion \u2014 gas accumulation during maintenance, Durgapur, 2021: Hot work permit active in Zone C while gas pressure in collector main was elevated",
+    "metadata": {
+      "incident_id": "INC-002"
+    }
+  },
+  {
+    "id": "INC-002_cause_1",
+    "type": "root_cause",
+    "text": "Root cause of Coke oven explosion \u2014 gas accumulation during maintenance, Durgapur, 2021: Maintenance team not informed of gas pressure exceedance",
+    "metadata": {
+      "incident_id": "INC-002"
+    }
+  },
+  {
+    "id": "INC-002_cause_2",
+    "type": "root_cause",
+    "text": "Root cause of Coke oven explosion \u2014 gas accumulation during maintenance, Durgapur, 2021: Emergency shutdown procedure not initiated when pressure exceeded 8 kPa",
+    "metadata": {
+      "incident_id": "INC-002"
+    }
+  },
+  {
+    "id": "INC-002_prevention",
+    "type": "prevention_action",
+    "text": "Automatic hot work permit suspension when adjacent pressure sensor exceeds warning",
+    "metadata": {
+      "incident_id": "INC-002"
+    }
+  },
+  {
+    "id": "INC-002_prevention",
+    "type": "prevention_action",
+    "text": "Real-time gas tightness monitoring during all maintenance activities",
+    "metadata": {
+      "incident_id": "INC-002"
+    }
+  },
+  {
+    "id": "INC-002_prevention",
+    "type": "prevention_action",
+    "text": "Mandatory zone clearance before any hot work in Zone 1 areas",
+    "metadata": {
+      "incident_id": "INC-002"
+    }
+  },
+  {
+    "id": "INC-003_body",
+    "type": "incident_report",
+    "text": "On 12 January 2025, eight workers were killed and fourteen injured in an explosion at Coke Oven Battery 3, Visakhapatnam Steel Plant. An investigation by The Wire found that warning signals from gas pressure sensors existed, but no intelligence layer connected those readings to operational decisions in time. Five distinct precursor conditions were identifiable in SCADA data up to 73 minutes before the event: elevated H2S trending in Zone C, collector main pressure above warning threshold, gas detector G-09 offline for calibration, hot work permit PTW-047 active in Zone C, and shift changeover completed without a gas trend briefing. Each condition was below the threshold for a standalone alert. Together, they constituted an imminent explosion risk. The SCADA system logged every reading. The intelligence to act on them was absent.",
+    "metadata": {
+      "incident_id": "INC-003",
+      "date": "2025-01-12",
+      "fatalities": 8,
+      "hazard_type": "explosion",
+      "precursor_signals": [
+        "H2S trending upward in Zone C for 73 minutes before explosion",
+        "Collector main pressure at 8.6 kPa \u2014 above warning, below critical",
+        "G-09 offline for calibration \u2014 Zone C had reduced sensor coverage",
+        "Hot work permit PTW-047 active for angle grinding in Zone C",
+        "Shift B/C changeover at 22:00 \u2014 incoming supervisor not informed of gas trend"
+      ]
+    }
+  },
+  {
+    "id": "INC-003_cause_0",
+    "type": "root_cause",
+    "text": "Root cause of Vizag Steel Plant coke oven explosion \u2014 8 fatalities, January 2025: No intelligence layer to correlate existing sensor data into compound risk",
+    "metadata": {
+      "incident_id": "INC-003"
+    }
+  },
+  {
+    "id": "INC-003_cause_1",
+    "type": "root_cause",
+    "text": "Root cause of Vizag Steel Plant coke oven explosion \u2014 8 fatalities, January 2025: Gas detector maintenance created coverage blind spot in Battery 3",
+    "metadata": {
+      "incident_id": "INC-003"
+    }
+  },
+  {
+    "id": "INC-003_cause_2",
+    "type": "root_cause",
+    "text": "Root cause of Vizag Steel Plant coke oven explosion \u2014 8 fatalities, January 2025: PTW system not integrated with real-time SCADA readings",
+    "metadata": {
+      "incident_id": "INC-003"
+    }
+  },
+  {
+    "id": "INC-003_cause_3",
+    "type": "root_cause",
+    "text": "Root cause of Vizag Steel Plant coke oven explosion \u2014 8 fatalities, January 2025: Shift changeover incomplete \u2014 incoming supervisor not briefed on gas trends",
+    "metadata": {
+      "incident_id": "INC-003"
+    }
+  },
+  {
+    "id": "INC-003_cause_4",
+    "type": "root_cause",
+    "text": "Root cause of Vizag Steel Plant coke oven explosion \u2014 8 fatalities, January 2025: No pre-entry atmospheric test for workers entering coke side",
+    "metadata": {
+      "incident_id": "INC-003"
+    }
+  },
+  {
+    "id": "INC-003_prevention",
+    "type": "prevention_action",
+    "text": "Compound risk engine correlating all sensor, permit, shift, and maintenance data",
+    "metadata": {
+      "incident_id": "INC-003"
+    }
+  },
+  {
+    "id": "INC-003_prevention",
+    "type": "prevention_action",
+    "text": "Real-time PTW suspension protocol on compound risk threshold breach",
+    "metadata": {
+      "incident_id": "INC-003"
+    }
+  },
+  {
+    "id": "INC-003_prevention",
+    "type": "prevention_action",
+    "text": "Mandatory shift briefing checklist including live gas trend review",
+    "metadata": {
+      "incident_id": "INC-003"
+    }
+  },
+  {
+    "id": "INC-003_prevention",
+    "type": "prevention_action",
+    "text": "No hot work in Zone 1 when any adjacent sensor in maintenance/offline state",
+    "metadata": {
+      "incident_id": "INC-003"
+    }
+  },
+  {
+    "id": "REG-001_6.3",
+    "type": "regulation",
+    "text": "OISD-GS-1: Safety practices for hydrocarbon industries \u2014 6.3: Toxic gas monitoring: H2S detectors shall be installed in all areas where H2S concentration may exceed 1 ppm. Hot work shall not be performed when H2S exceeds 5 ppm in the work zone or within 15 metres.",
+    "metadata": {
+      "reg_id": "REG-001",
+      "source": "Oil Industry Safety Directorate",
+      "clause": "6.3"
+    }
+  },
+  {
+    "id": "REG-001_6.4",
+    "type": "regulation",
+    "text": "OISD-GS-1: Safety practices for hydrocarbon industries \u2014 6.4: Carbon monoxide monitoring: CO detectors required in all confined spaces. Work shall be suspended when CO exceeds 25 ppm.",
+    "metadata": {
+      "reg_id": "REG-001",
+      "source": "Oil Industry Safety Directorate",
+      "clause": "6.4"
+    }
+  },
+  {
+    "id": "REG-001_7.1",
+    "type": "regulation",
+    "text": "OISD-GS-1: Safety practices for hydrocarbon industries \u2014 7.1: Gas pressure management: Hot work permits shall be automatically suspended when collector main pressure exceeds the warning threshold. All permits must be re-validated after any pressure exceedance event.",
+    "metadata": {
+      "reg_id": "REG-001",
+      "source": "Oil Industry Safety Directorate",
+      "clause": "7.1"
+    }
+  },
+  {
+    "id": "REG-001_5.2",
+    "type": "regulation",
+    "text": "OISD-GS-1: Safety practices for hydrocarbon industries \u2014 5.2: Explosive atmosphere management: No ignition sources in Zone 1 when CH4 exceeds 10% LEL. Mandatory gas-free certificate before hot work.",
+    "metadata": {
+      "reg_id": "REG-001",
+      "source": "Oil Industry Safety Directorate",
+      "clause": "5.2"
+    }
+  },
+  {
+    "id": "REG-002_S.36(1)",
+    "type": "regulation",
+    "text": "Factory Act 1948 \u2014 Sections 36\u201341: Dangerous operations \u2014 S.36(1): No person shall be required or allowed to enter any confined space in which dangerous fumes are likely to be present unless it has been certified safe by a competent person immediately before entry.",
+    "metadata": {
+      "reg_id": "REG-002",
+      "source": "Ministry of Labour and Employment",
+      "clause": "S.36(1)"
+    }
+  },
+  {
+    "id": "REG-002_S.36(1)(a)",
+    "type": "regulation",
+    "text": "Factory Act 1948 \u2014 Sections 36\u201341: Dangerous operations \u2014 S.36(1)(a): Atmospheric testing for oxygen, flammable, and toxic gases must be performed immediately before entry and documented in the permit-to-work system.",
+    "metadata": {
+      "reg_id": "REG-002",
+      "source": "Ministry of Labour and Employment",
+      "clause": "S.36(1)(a)"
+    }
+  },
+  {
+    "id": "REG-002_S.36(3)",
+    "type": "regulation",
+    "text": "Factory Act 1948 \u2014 Sections 36\u201341: Dangerous operations \u2014 S.36(3): No naked flame or light likely to ignite fumes shall be used in any confined space.",
+    "metadata": {
+      "reg_id": "REG-002",
+      "source": "Ministry of Labour and Employment",
+      "clause": "S.36(3)"
+    }
+  },
+  {
+    "id": "REG-002_S.37",
+    "type": "regulation",
+    "text": "Factory Act 1948 \u2014 Sections 36\u201341: Dangerous operations \u2014 S.37: Precautions against explosive or inflammable dust: where explosive dust is liable to be generated, effective measures to prevent accumulation.",
+    "metadata": {
+      "reg_id": "REG-002",
+      "source": "Ministry of Labour and Employment",
+      "clause": "S.37"
+    }
+  },
+  {
+    "id": "REG-003_4.1",
+    "type": "regulation",
+    "text": "DGFASLI operational manual OM-2023-11: Permit-to-work for chemical hazards \u2014 4.1: Permit-to-work cross-validation: All PTW systems must be validated against real-time gas monitor readings at the time of issue and at least every 30 minutes during active work.",
+    "metadata": {
+      "reg_id": "REG-003",
+      "source": "Directorate General Factory Advice Service & Labour Institutes",
+      "clause": "4.1"
+    }
+  },
+  {
+    "id": "REG-003_4.3",
+    "type": "regulation",
+    "text": "DGFASLI operational manual OM-2023-11: Permit-to-work for chemical hazards \u2014 4.3: Automatic suspension trigger: PTW shall be suspended immediately when any gas sensor within 20 metres of the work zone exceeds the warning threshold.",
+    "metadata": {
+      "reg_id": "REG-003",
+      "source": "Directorate General Factory Advice Service & Labour Institutes",
+      "clause": "4.3"
+    }
+  },
+  {
+    "id": "REG-003_5.2",
+    "type": "regulation",
+    "text": "DGFASLI operational manual OM-2023-11: Permit-to-work for chemical hazards \u2014 5.2: Shift changeover protocol: Incoming shift supervisor must review all active permits and current gas monitor trends before accepting responsibility.",
+    "metadata": {
+      "reg_id": "REG-003",
+      "source": "Directorate General Factory Advice Service & Labour Institutes",
+      "clause": "5.2"
+    }
+  },
+  {
+    "id": "REG-003_6.1",
+    "type": "regulation",
+    "text": "DGFASLI operational manual OM-2023-11: Permit-to-work for chemical hazards \u2014 6.1: Sensor maintenance: When a gas detector is taken offline for maintenance, no hot work or confined space entry shall be permitted in the coverage area without deployment of a portable backup detector.",
+    "metadata": {
+      "reg_id": "REG-003",
+      "source": "Directorate General Factory Advice Service & Labour Institutes",
+      "clause": "6.1"
+    }
+  }
+]

@@ -1,0 +1,151 @@
+{
+  "timestamp": "2026-06-24T17:12:55.133020",
+  "scenario": "normal_ops",
+  "elapsed_minutes": 0.0,
+  "sensors": {
+    "G-01": {
+      "type": "H2S",
+      "value": 1.2,
+      "unit": "ppm",
+      "status": "WARNING",
+      "threshold_warning": 5.0,
+      "threshold_critical": 10.0,
+      "regulatory_ref": "OISD-GS-1 Clause 6.3, Factory Act Schedule 2"
+    },
+    "G-04": {
+      "type": "H2S",
+      "value": 1.18,
+      "unit": "ppm",
+      "status": "WARNING",
+      "threshold_warning": 5.0,
+      "threshold_critical": 10.0,
+      "regulatory_ref": "OISD-GS-1 Clause 6.3, Factory Act Schedule 2"
+    },
+    "G-07": {
+      "type": "H2S",
+      "value": 1.18,
+      "unit": "ppm",
+      "status": "WARNING",
+      "threshold_warning": 5.0,
+      "threshold_critical": 10.0,
+      "regulatory_ref": "OISD-GS-1 Clause 6.3, Factory Act Schedule 2"
+    },
+    "G-02": {
+      "type": "CO",
+      "value": 7.95,
+      "unit": "ppm",
+      "status": "NORMAL",
+      "threshold_warning": 25.0,
+      "threshold_critical": 50.0,
+      "regulatory_ref": "OISD-GS-1 Clause 6.4, DGFASLI Guidelines"
+    },
+    "G-05": {
+      "type": "CO",
+      "value": 7.97,
+      "unit": "ppm",
+      "status": "NORMAL",
+      "threshold_warning": 25.0,
+      "threshold_critical": 50.0,
+      "regulatory_ref": "OISD-GS-1 Clause 6.4, DGFASLI Guidelines"
+    },
+    "G-08": {
+      "type": "CO",
+      "value": 8.11,
+      "unit": "ppm",
+      "status": "NORMAL",
+      "threshold_warning": 25.0,
+      "threshold_critical": 50.0,
+      "regulatory_ref": "OISD-GS-1 Clause 6.4, DGFASLI Guidelines"
+    },
+    "G-03": {
+      "type": "CH4",
+      "value": 3.02,
+      "unit": "%LEL",
+      "status": "NORMAL",
+      "threshold_warning": 10.0,
+      "threshold_critical": 20.0,
+      "regulatory_ref": "OISD-GS-1 Clause 5.2, Factory Act S.36"
+    },
+    "G-06": {
+      "type": "CH4",
+      "value": 2.99,
+      "unit": "%LEL",
+      "status": "NORMAL",
+      "threshold_warning": 10.0,
+      "threshold_critical": 20.0,
+      "regulatory_ref": "OISD-GS-1 Clause 5.2, Factory Act S.36"
+    },
+    "G-09": {
+      "type": "CH4",
+      "value": 2.94,
+      "unit": "%LEL",
+      "status": "NORMAL",
+      "threshold_warning": 10.0,
+      "threshold_critical": 20.0,
+      "regulatory_ref": "OISD-GS-1 Clause 5.2, Factory Act S.36"
+    },
+    "G-10": {
+      "type": "O2",
+      "value": 21.1,
+      "unit": "%",
+      "status": "WARNING",
+      "threshold_warning": 19.5,
+      "threshold_critical": 17.0,
+      "regulatory_ref": "Factory Act S.36(1), DGMS Circular 2019"
+    },
+    "T-01": {
+      "type": "TEMP",
+      "value": 37.94,
+      "unit": "\u00b0C",
+      "status": "NORMAL",
+      "threshold_warning": 55.0,
+      "threshold_critical": 65.0,
+      "regulatory_ref": "Factory Act S.13, OISD-STD-105"
+    },
+    "T-02": {
+      "type": "TEMP",
+      "value": 38.75,
+      "unit": "\u00b0C",
+      "status": "NORMAL",
+      "threshold_warning": 55.0,
+      "threshold_critical": 65.0,
+      "regulatory_ref": "Factory Act S.13, OISD-STD-105"
+    },
+    "P-01": {
+      "type": "PRESSURE",
+      "value": 1.93,
+      "unit": "kPa",
+      "status": "NORMAL",
+      "threshold_warning": 7.0,
+      "threshold_critical": 10.0,
+      "regulatory_ref": "OISD-GS-1 Clause 7.1"
+    },
+    "P-02": {
+      "type": "PRESSURE",
+      "value": 1.92,
+      "unit": "kPa",
+      "status": "NORMAL",
+      "threshold_warning": 7.0,
+      "threshold_critical": 10.0,
+      "regulatory_ref": "OISD-GS-1 Clause 7.1"
+    }
+  },
+  "alerts": [],
+  "permits": [],
+  "shift_log": {
+    "shift": "B",
+    "supervisor": "R. Venkatesh",
+    "start_time": "2026-06-24T22:00:00.133020",
+    "handover_complete": true,
+    "in_changeover_window": false,
+    "headcount": 24,
+    "workers_in_hazardous_zones": {
+      "ZONE_A": 3,
+      "ZONE_B": 4,
+      "ZONE_C": 2,
+      "MAINTENANCE_BAY": 5
+    },
+    "notes": "Battery 3 push side showing elevated readings since 21:30. G-09 taken offline at 21:15 for scheduled calibration. PTW-047 hot work permit active in Zone C \u2014 not reviewed against current gas readings.",
+    "fatigue_flag": false
+  }
+}

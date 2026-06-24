@@ -1,132 +1,226 @@
-# main.py — SafetyIQ FastAPI Backend
-# REST + WebSocket — sends full RiskAssessment to frontend
-# Run: uvicorn main:app --reload
+"""
+SafetyIQ — FastAPI backend
+Member 2 owns this file.
 
-import asyncio, json, sys, os
-from datetime import datetime, timezone
-from dataclasses import asdict
+Endpoints:
+  GET  /                          health check
+  GET  /scenarios                 list all 4 scenarios
+  GET  /assessment/{scenario}     full RiskAssessment JSON  ← matches previous session
+  GET  /api/snapshot/{scenario}   alias for above
+  GET  /zones                     plant zone definitions
+  GET  /thresholds                sensor thresholds + regulatory sources
+  GET  /vizag                     Vizag incident precursor data
+  WS   /ws/stream/{scenario}      live stream (2s interval)
+  WS   /ws/escalation             auto-cycles all 4 scenarios (judge demo mode)
+
+Run:
+  uvicorn main:app --reload --port 8000
+"""
+
+import json, asyncio, sys, os
+from datetime import datetime
+from typing import Dict, Set
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config.settings import ZONES, SENSOR_THRESHOLDS, VIZAG_INCIDENT
-from data.simulator import SCENARIOS, build_snapshot
-from data.adapter import snapshot_to_typed
-from agents.risk_engine import assess_risk
+from config.settings import INCIDENT_SCENARIOS, PLANT_ZONES, SENSOR_THRESHOLDS
+from data.simulator import SensorSimulator
+from data.adapter import to_plant_reading
 
-app = FastAPI(
-    title="SafetyIQ — Industrial Safety Intelligence",
-    description="Compound risk detection for zero-harm plant operations",
-    version="1.0.0"
-)
-
+app = FastAPI(title="SafetyIQ API", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+_connections: Dict[str, Set[WebSocket]] = {}
 
-def full_assessment(scenario: str) -> dict:
-    """Build raw snapshot → typed → risk assessment → serializable dict."""
-    raw = build_snapshot(scenario)
-    typed = snapshot_to_typed(raw)
-    assessment = assess_risk(typed)
-    return {
-        "scenario": scenario,
-        "scenario_label": raw["scenario_label"],
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "compound_risk_score": assessment.compound_risk_score,
-        "alert_level": assessment.alert_level,
-        "predicted_breach_minutes": assessment.predicted_breach_minutes,
-        "risk_factors": [
-            {
-                "name": f.name, "score": f.score, "weight": f.weight,
-                "contribution": f.contribution, "detail": f.detail
-            }
-            for f in assessment.risk_factors
-        ],
-        "recommended_actions": assessment.recommended_actions,
-        "sensors": raw["sensors"],
-        "permits": raw["permits"],
-        "summary": raw["summary"],
-        "shift_changeover_active": raw["shift_changeover_active"],
-        "entry_check_logged": raw["entry_check_logged"],
-    }
+# Graceful fallback if Member 1's engine isn't ready yet
+try:
+    from agents.risk_engine import RiskEngine
+    _engine_available = True
+    print("✓ Risk engine loaded")
+except ImportError:
+    _engine_available = False
+    print("⚠  Risk engine not found — streaming raw simulator data (Week 1 mode)")
 
 
-# ─── REST ───────────────────────────────────────────────────────────────────
+def _process(raw: dict, engine=None) -> dict:
+    if engine:
+        reading    = to_plant_reading(raw)
+        assessment = engine.assess(reading)
+        return assessment.to_dict()
+    return raw
+
+
+# ── REST ─────────────────────────────────────────────────────────────────────
 
 @app.get("/")
-def root():
-    return {"status": "online", "project": "SafetyIQ", "version": "1.0.0"}
+def health():
+    return {
+        "status": "ok", "service": "SafetyIQ",
+        "timestamp": datetime.now().isoformat(),
+        "risk_engine_loaded": _engine_available,
+        "scenarios": list(INCIDENT_SCENARIOS.keys()),
+    }
+
 
 @app.get("/scenarios")
 def list_scenarios():
     return {
-        k: {
-            "label": v["label"],
-            "compound_risk_score": v["compound_risk_score"],
-            "predicted_breach_minutes": v["predicted_breach_minutes"]
+        name: {
+            "description":       sc["description"],
+            "duration_minutes":  sc["duration_minutes"],
+            "active_permits":    len(sc.get("active_permits", [])),
+            "has_incidents":     bool(sc.get("incidents")),
+            "offline_sensors":   sc.get("maintenance_offline", []),
         }
-        for k, v in SCENARIOS.items()
+        for name, sc in INCIDENT_SCENARIOS.items()
     }
 
+
 @app.get("/assessment/{scenario}")
+@app.get("/api/snapshot/{scenario}")     # alias kept for compatibility
 def get_assessment(scenario: str):
-    if scenario not in SCENARIOS:
-        return JSONResponse(status_code=404, content={"error": f"Unknown scenario: {scenario}"})
-    return full_assessment(scenario)
+    if scenario not in INCIDENT_SCENARIOS:
+        return {"error": f"Unknown scenario '{scenario}'",
+                "valid": list(INCIDENT_SCENARIOS.keys())}
+    engine = RiskEngine() if _engine_available else None
+    sim    = SensorSimulator(scenario)
+    return _process(sim.full_snapshot(), engine)
+
 
 @app.get("/zones")
 def get_zones():
-    return ZONES
+    return {
+        zid: {
+            "name":                 z.name,
+            "description":          z.description,
+            "hazardous_area_class": z.hazardous_area_class,
+            "sensors":              z.sensors,
+            "position":             {"x": z.x, "y": z.y, "w": z.width, "h": z.height},
+        }
+        for zid, z in PLANT_ZONES.items()
+    }
+
 
 @app.get("/thresholds")
 def get_thresholds():
-    return SENSOR_THRESHOLDS
+    return {
+        stype: {
+            "unit":           t.unit,
+            "normal_max":     t.normal_max,
+            "warning":        t.warning,
+            "critical":       t.critical,
+            "idlh":           t.idlh,
+            "twa_limit":      t.twa_limit,
+            "description":    t.description,
+            "regulatory_ref": t.regulatory_ref,
+        }
+        for stype, t in SENSOR_THRESHOLDS.items()
+    }
+
 
 @app.get("/vizag")
 def get_vizag():
-    return VIZAG_INCIDENT
+    """Vizag incident precursor data — used by Member 4 in the demo."""
+    sc = INCIDENT_SCENARIOS["vizag_pattern"]
+    return {
+        "incident":         "Visakhapatnam Steel Plant, Coke Oven Battery 3",
+        "date":             "12 January 2025",
+        "fatalities":       8,
+        "injuries":         14,
+        "precursor_signals": sc["incidents"],
+        "compound_lead_time_minutes": 145,
+        "single_sensor_alert_minutes": 156,
+        "all_five_precursors": [
+            "H2S trending upward in Zone C for 73 minutes",
+            "Collector main pressure above warning threshold",
+            "G-09 offline for calibration — blind spot in Zone C",
+            "Hot work permit PTW-047 active in Zone C",
+            "Shift B/C changeover without gas trend briefing",
+        ],
+        "regulatory_violations": [
+            "OISD-GS-1 Clause 6.3 — hot work in elevated H2S zone",
+            "OISD-GS-1 Clause 7.1 — PTW not suspended on pressure exceedance",
+            "Factory Act S.36(1)(a) — no pre-entry atmospheric test",
+            "DGFASLI OM-2023-11 Clause 4.3 — PTW not cross-checked against live readings",
+            "DGFASLI OM-2023-11 Clause 6.1 — no backup detector when G-09 offline",
+        ],
+    }
 
 
-# ─── WebSocket — live streaming ──────────────────────────────────────────────
+# ── WebSockets ────────────────────────────────────────────────────────────────
 
 @app.websocket("/ws/stream/{scenario}")
 async def stream(websocket: WebSocket, scenario: str):
     """
-    Frontend connects: new WebSocket('ws://localhost:8000/ws/stream/vizag_pattern')
-    Sends a full RiskAssessment every 2 seconds.
+    Live stream — one reading every 2 real seconds (10× sim time).
+    Frontend: const ws = new WebSocket('ws://localhost:8000/ws/stream/vizag_pattern')
     """
-    await websocket.accept()
-    if scenario not in SCENARIOS:
-        await websocket.send_json({"error": f"Unknown scenario: {scenario}"})
-        await websocket.close()
+    if scenario not in INCIDENT_SCENARIOS:
+        await websocket.close(code=4004, reason=f"Unknown scenario: {scenario}")
         return
+
+    await websocket.accept()
+    _connections.setdefault(scenario, set()).add(websocket)
+
+    sim    = SensorSimulator(scenario)
+    engine = RiskEngine() if _engine_available else None
+    limit  = INCIDENT_SCENARIOS[scenario]["duration_minutes"]
+
     try:
-        while True:
-            await websocket.send_text(json.dumps(full_assessment(scenario)))
+        while sim.elapsed_minutes < limit:
+            payload = _process(sim.full_snapshot(), engine)
+            await websocket.send_text(json.dumps(payload, default=str))
             await asyncio.sleep(2.0)
+            sim.elapsed_minutes += 2.0 * 10.0 / 60.0
+        await websocket.send_text(json.dumps({"type": "scenario_complete", "scenario": scenario}))
     except WebSocketDisconnect:
         pass
+    finally:
+        _connections.get(scenario, set()).discard(websocket)
 
 
 @app.websocket("/ws/escalation")
-async def escalation_demo(websocket: WebSocket):
+async def escalation(websocket: WebSocket):
     """
-    Judge demo endpoint — cycles through all 4 scenarios automatically.
-    Shows the escalation from Normal → Vizag Pattern in real time.
+    Judge demo mode — auto-cycles through all 4 scenarios in order.
+    Shows the full risk escalation from normal → CRITICAL in one stream.
+    Frontend: const ws = new WebSocket('ws://localhost:8000/ws/escalation')
     """
     await websocket.accept()
-    scenarios = list(SCENARIOS.keys())
-    idx = 0
+    engine = RiskEngine() if _engine_available else None
+
+    CYCLE = [
+        ("normal_ops",       30),   # 30 sim-minutes of normal
+        ("gas_rising",       45),   # 45 sim-minutes rising
+        ("hot_work_conflict",60),   # 60 sim-minutes of conflict
+        ("vizag_pattern",    30),   # 30 sim-minutes of CRITICAL
+    ]
+
     try:
-        while True:
-            scenario = scenarios[idx % len(scenarios)]
-            data = full_assessment(scenario)
-            data["_demo_step"] = idx + 1
-            data["_next_scenario"] = scenarios[(idx + 1) % len(scenarios)]
-            await websocket.send_text(json.dumps(data))
-            await asyncio.sleep(3.0)
-            idx += 1
+        for scenario, duration in CYCLE:
+            sim       = SensorSimulator(scenario)
+            sim_limit = duration
+
+            await websocket.send_text(json.dumps({
+                "type":     "scenario_start",
+                "scenario": scenario,
+                "description": INCIDENT_SCENARIOS[scenario]["description"],
+            }))
+
+            while sim.elapsed_minutes < sim_limit:
+                payload = _process(sim.full_snapshot(), engine)
+                payload["_escalation_scenario"] = scenario
+                await websocket.send_text(json.dumps(payload, default=str))
+                await asyncio.sleep(1.5)
+                sim.elapsed_minutes += 1.5 * 10.0 / 60.0
+
+        await websocket.send_text(json.dumps({"type": "escalation_complete"}))
     except WebSocketDisconnect:
         pass
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
