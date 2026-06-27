@@ -243,13 +243,13 @@ def build_corpus(output_dir: str = "data/corpus") -> None:
                 "text": f"Root cause of {inc['title']}: {cause}",
                 "metadata": {"incident_id": inc["id"]},
             })
-        for action in inc["prevention_actions"]:
-            chunks.append({
-                "id": f"{inc['id']}_prevention",
-                "type": "prevention_action",
-                "text": action,
-                "metadata": {"incident_id": inc["id"]},
-            })
+        for i, action in enumerate(inc["prevention_actions"]):
+         chunks.append({
+        "id": f"{inc['id']}_prevention_{i}",
+        "type": "prevention_action",
+        "text": action,
+        "metadata": {"incident_id": inc["id"]},
+    })
 
     for reg in REGULATORY_DOCS:
         for clause_id, text in reg["clauses"].items():

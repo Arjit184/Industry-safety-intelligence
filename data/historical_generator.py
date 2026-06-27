@@ -49,19 +49,30 @@ NEAR_MISS_BASE = {
 def _noise(value: float, factor: float = 0.05) -> float:
     return max(0.0, value + random.gauss(0, abs(value) * factor + 0.01))
 
-
 def _sensor_status(stype: str, value: float) -> str:
     t = SENSOR_THRESHOLDS[stype]
+
+    warning = t["warning"]
+    critical = t["critical"]
+    idlh = t["idlh"]
+
     if stype == "O2":
-        if value >= t.normal_max: return "NORMAL"
-        if value >= t.warning:    return "WARNING"
-        if value >= t.critical:   return "CRITICAL"
-        return "IDLH"
+        if value >= warning:
+            return "NORMAL"
+        elif value >= critical:
+            return "WARNING"
+        else:
+            return "CRITICAL"
+
     else:
-        if value <= t.normal_max: return "NORMAL"
-        if value <= t.warning:    return "WARNING"
-        if value <= t.critical:   return "CRITICAL"
-        return "IDLH"
+        if value < warning:
+            return "NORMAL"
+        elif value < critical:
+            return "WARNING"
+        elif idlh is not None and value < idlh:
+            return "CRITICAL"
+        else:
+            return "IDLH"
 
 
 def _build_reading(ts: datetime, base: Dict, noise: float = 0.05,
@@ -91,7 +102,7 @@ def _build_reading(ts: datetime, base: Dict, noise: float = 0.05,
             sensors[sid] = {
                 "type":   stype,
                 "value":  None if offline else round(val, 2),
-                "unit":   SENSOR_THRESHOLDS[stype].unit,
+                "unit": SENSOR_THRESHOLDS[stype]["unit"],
                 "status": "OFFLINE" if offline else status,
             }
             if not offline and status in ("WARNING", "CRITICAL", "IDLH"):
