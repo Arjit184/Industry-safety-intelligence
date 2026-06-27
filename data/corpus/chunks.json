@@ -40,7 +40,7 @@
     }
   },
   {
-    "id": "INC-001_prevention",
+    "id": "INC-001_prevention_0",
     "type": "prevention_action",
     "text": "Real-time PTW cross-check with gas sensor readings",
     "metadata": {
@@ -48,7 +48,7 @@
     }
   },
   {
-    "id": "INC-001_prevention",
+    "id": "INC-001_prevention_1",
     "type": "prevention_action",
     "text": "Automatic PTW suspension when adjacent sensor exceeds warning threshold",
     "metadata": {
@@ -56,7 +56,7 @@
     }
   },
   {
-    "id": "INC-001_prevention",
+    "id": "INC-001_prevention_2",
     "type": "prevention_action",
     "text": "Mandatory re-atmospheric test after any sensor reading change during confined space work",
     "metadata": {
@@ -104,7 +104,7 @@
     }
   },
   {
-    "id": "INC-002_prevention",
+    "id": "INC-002_prevention_0",
     "type": "prevention_action",
     "text": "Automatic hot work permit suspension when adjacent pressure sensor exceeds warning",
     "metadata": {
@@ -112,7 +112,7 @@
     }
   },
   {
-    "id": "INC-002_prevention",
+    "id": "INC-002_prevention_1",
     "type": "prevention_action",
     "text": "Real-time gas tightness monitoring during all maintenance activities",
     "metadata": {
@@ -120,7 +120,7 @@
     }
   },
   {
-    "id": "INC-002_prevention",
+    "id": "INC-002_prevention_2",
     "type": "prevention_action",
     "text": "Mandatory zone clearance before any hot work in Zone 1 areas",
     "metadata": {
@@ -186,7 +186,7 @@
     }
   },
   {
-    "id": "INC-003_prevention",
+    "id": "INC-003_prevention_0",
     "type": "prevention_action",
     "text": "Compound risk engine correlating all sensor, permit, shift, and maintenance data",
     "metadata": {
@@ -194,7 +194,7 @@
     }
   },
   {
-    "id": "INC-003_prevention",
+    "id": "INC-003_prevention_1",
     "type": "prevention_action",
     "text": "Real-time PTW suspension protocol on compound risk threshold breach",
     "metadata": {
@@ -202,7 +202,7 @@
     }
   },
   {
-    "id": "INC-003_prevention",
+    "id": "INC-003_prevention_2",
     "type": "prevention_action",
     "text": "Mandatory shift briefing checklist including live gas trend review",
     "metadata": {
@@ -210,7 +210,7 @@
     }
   },
   {
-    "id": "INC-003_prevention",
+    "id": "INC-003_prevention_3",
     "type": "prevention_action",
     "text": "No hot work in Zone 1 when any adjacent sensor in maintenance/offline state",
     "metadata": {

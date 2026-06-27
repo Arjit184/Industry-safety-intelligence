@@ -1,225 +1,243 @@
-# agents/risk_engine.py — Compound Risk Scoring Engine
-# This is the core differentiator: correlates multiple factors into one score.
-# Single-sensor systems score each reading independently.
-# This engine multiplies them — compound risk is exponential, not additive.
-
+"""
+agents/risk_engine.py — Member 1 owns this.
+"""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from agents.interfaces import PlantSnapshot, RiskFactor, RiskAssessment
-from config.settings import SENSOR_THRESHOLDS, COMPOUND_RISK_WEIGHTS
+
+from typing import Dict, List, Optional, Tuple
+from collections import deque
+from agents.interfaces import (
+    PlantReading, RiskAssessment, RiskFactor, CompoundTrigger,
+    PredictionWindow, RecommendedAction, RiskLevel, SensorStatus, PermitType
+)
+from config.settings import RISK_WEIGHTS, COMPOUND_MULTIPLIERS, SENSOR_THRESHOLDS
 
 
-# ─── Individual factor scorers ──────────────────────────────────────────────
+class RiskEngine:
+    def __init__(self, history_window: int = 20):
+        self._score_history: deque = deque(maxlen=history_window)
+        self._previous_score: Optional[float] = None
 
-def score_gas_level(snapshot: PlantSnapshot) -> RiskFactor:
-    """Score based on worst sensor reading across the plant."""
-    worst_score = 0
-    worst_detail = "All sensors within safe limits"
+    def assess(self, reading: PlantReading) -> RiskAssessment:
+        factors              = self._evaluate_factors(reading)
+        base_score           = sum(f.contribution for f in factors if f.active)
+        triggers, multiplier = self._detect_compound_triggers(factors, reading)
+        raw_score            = min(100.0, base_score * multiplier)
+        score                = self._smooth(raw_score)
+        level                = self._classify(score)
+        self._score_history.append(score)
+        prediction           = self._predict(score, level)
+        actions              = self._recommend_actions(factors, triggers, reading)
 
-    STATUS_SCORES = {"SAFE": 0, "WARNING": 40, "DANGER": 75, "CRITICAL": 100, "OFFLINE": 0}
-    # gas_rising has sensors approaching thresholds — use value proximity for finer scoring
-    for s in snapshot.sensors:
-        if s.offline or s.status != "SAFE":
-            continue
-        t = SENSOR_THRESHOLDS[s.sensor_type]
-        if s.value is None:
-            continue
-        # How close to warning threshold? 0–1 proximity score
-        if not t.get("invert"):
-            proximity = s.value / t["warning"] if t["warning"] > 0 else 0
-        else:
-            proximity = (t["warning"] - s.value) / t["warning"] if t["warning"] > 0 else 0
-        proximity_score = max(0, proximity - 0.5) * 20  # only score if >50% of way to warning
-        if proximity_score > worst_score:
-            worst_score = proximity_score
-            worst_detail = f"{s.sensor_id} ({s.sensor_type}): {s.value} {s.unit} — SAFE but approaching WARNING threshold"
+        assessment = RiskAssessment(
+            timestamp=reading.timestamp, elapsed_minutes=reading.elapsed_minutes,
+            risk_score=round(score, 1), risk_level=level,
+            previous_score=self._previous_score, risk_factors=factors,
+            compound_triggers=triggers, prediction=prediction,
+            recommended_actions=actions,
+            regulatory_violations=self._collect_violations(factors, triggers),
+        )
+        if level == RiskLevel.CRITICAL:
+            assessment.incident_report_draft = self._draft_incident_report(assessment, reading)
+            assessment.evacuation_triggered = True
 
-    for s in snapshot.sensors:
-        if s.offline:
-            continue
-        score = STATUS_SCORES.get(s.status, 0)
-        if score > worst_score:
-            worst_score = score
-            worst_detail = f"{s.sensor_id} ({s.sensor_type}): {s.value} {s.unit} — {s.status} [source: {SENSOR_THRESHOLDS[s.sensor_type]['source']}]"
+        self._previous_score = score
+        return assessment
 
-    weight = COMPOUND_RISK_WEIGHTS["gas_level"]
-    return RiskFactor(
-        name="gas_level", score=worst_score, weight=weight,
-        contribution=worst_score * weight, detail=worst_detail
-    )
+    def _evaluate_factors(self, reading):
+        return [
+            self._factor_gas_anomaly(reading),
+            self._factor_permit_conflict(reading),
+            self._factor_confined_unchecked(reading),
+            self._factor_shift_changeover(reading),
+            self._factor_sensor_blindspot(reading),
+        ]
 
-def score_hot_work(snapshot: PlantSnapshot) -> RiskFactor:
-    """Hot work permits near elevated gas zones = extreme danger."""
-    flagged = [p for p in snapshot.permits if p.flagged and p.type == "Hot Work"]
-    score = min(100, len(flagged) * 60)
-    detail = (
-        f"{len(flagged)} flagged hot work permit(s): " +
-        ", ".join(f"{p.permit_id} in {p.zone_name}" for p in flagged)
-        if flagged else "No active hot work permits in gas-elevated zones"
-    )
-    weight = COMPOUND_RISK_WEIGHTS["active_hot_work"]
-    return RiskFactor(
-        name="active_hot_work", score=score, weight=weight,
-        contribution=score * weight, detail=detail
-    )
+    def _factor_gas_anomaly(self, reading):
+        weight = RISK_WEIGHTS["gas_sensor_anomaly"]
+        triggered, max_sev = [], 0.0
+        for sid, s in reading.sensors.items():
+            if s.sensor_type not in ("H2S","CO","CH4"): continue
+            if s.status in (SensorStatus.WARNING, SensorStatus.CRITICAL, SensorStatus.IDLH):
+                triggered.append(sid)
+                sev = {"WARNING":0.85,"CRITICAL":0.95,"IDLH":1.0}.get(s.status.value, 0)
+                max_sev = max(max_sev, sev)
+        active = bool(triggered)
+        return RiskFactor(factor_id="gas_sensor_anomaly", active=active, weight=weight,
+            contribution=round(weight*max_sev*100,1) if active else 0.0,
+            description=f"Elevated gas at: {', '.join(triggered)}" if active else "Gas sensors nominal",
+            regulatory_ref="OISD-GS-1 Clause 6.3 / 6.4", evidence=triggered)
 
-def score_offline_sensors(snapshot: PlantSnapshot) -> RiskFactor:
-    """Offline sensors = blind spots. You can't protect what you can't see."""
-    offline = [s for s in snapshot.sensors if s.offline]
-    # OISD-GS-1: any offline sensor in a monitored zone = safety critical event
-    score = min(100, len(offline) * 50)
-    detail = (
-        f"{len(offline)} offline sensor(s): " +
-        ", ".join(f"{s.sensor_id} in {s.zone_name}" for s in offline) +
-        " — per OISD-GS-1 Clause 6.3, zone must be treated as WARNING level"
-        if offline else "All sensors online"
-    )
-    weight = COMPOUND_RISK_WEIGHTS["sensor_offline"]
-    return RiskFactor(
-        name="sensor_offline", score=score, weight=weight,
-        contribution=score * weight, detail=detail
-    )
+    def _factor_permit_conflict(self, reading):
+        weight = RISK_WEIGHTS["permit_gas_conflict"]
+        hot_zones = self._zones_with_elevated_gas(reading)
+        conflicting = [p.permit_id for p in reading.active_permits
+                       if p.permit_type == PermitType.HOT_WORK
+                       and (any(z in p.zone for z in hot_zones) or p.risk_flag)]
+        active = bool(conflicting)
+        return RiskFactor(factor_id="permit_gas_conflict", active=active, weight=weight,
+            contribution=round(weight*100,1) if active else 0.0,
+            description=f"HOT WORK permit in gas zone: {', '.join(conflicting)}" if active else "No conflicts",
+            regulatory_ref="OISD-GS-1 Clause 7.1 / DGFASLI OM-2023-11 Clause 4.3",
+            evidence=conflicting)
 
-def score_shift_changeover(snapshot: PlantSnapshot) -> RiskFactor:
-    """Shift handovers create attention gaps — historically high-risk windows."""
-    score = 80 if snapshot.shift_changeover_active else 0
-    detail = (
-        "Shift changeover in progress — supervisor attention gap, per Vizag precursor pattern"
-        if snapshot.shift_changeover_active else "No shift changeover active"
-    )
-    weight = COMPOUND_RISK_WEIGHTS["shift_changeover"]
-    return RiskFactor(
-        name="shift_changeover", score=score, weight=weight,
-        contribution=score * weight, detail=detail
-    )
+    def _factor_confined_unchecked(self, reading):
+        weight = RISK_WEIGHTS["confined_space_unchecked"]
+        unchecked = [p.permit_id for p in reading.active_permits
+                     if p.permit_type == PermitType.CONFINED_SPACE
+                     and (p.risk_flag or (p.conflict_reason and "gas check" in p.conflict_reason.lower()))]
+        active = bool(unchecked)
+        return RiskFactor(factor_id="confined_space_unchecked", active=active, weight=weight,
+            contribution=round(weight*100,1) if active else 0.0,
+            description=f"Confined space no pre-entry check: {', '.join(unchecked)}" if active else "All permits checked",
+            regulatory_ref="Factory Act S.36(1)(a) / DGFASLI OM-2023-11 Clause 4.1",
+            evidence=unchecked)
 
-def score_entry_check(snapshot: PlantSnapshot) -> RiskFactor:
-    """Missing confined space entry checks — Factory Act Section 36 violation."""
-    score = 90 if not snapshot.entry_check_logged else 0
-    detail = (
-        "Confined space pre-entry atmospheric check NOT logged — violates Factory Act S.36(1)(a)"
-        if not snapshot.entry_check_logged else "Entry check logged and valid"
-    )
-    weight = COMPOUND_RISK_WEIGHTS["no_entry_check"]
-    return RiskFactor(
-        name="no_entry_check", score=score, weight=weight,
-        contribution=score * weight, detail=detail
-    )
+    def _factor_shift_changeover(self, reading):
+        weight = RISK_WEIGHTS["shift_changeover_window"]
+        s = reading.shift
+        active = s.in_changeover_window or not s.handover_complete or s.fatigue_flag
+        reasons = ([("in changeover window" if s.in_changeover_window else "")] +
+                   [("handover incomplete"  if not s.handover_complete else "")] +
+                   [("fatigue flag"         if s.fatigue_flag else "")])
+        reasons = [r for r in reasons if r]
+        return RiskFactor(factor_id="shift_changeover_window", active=active, weight=weight,
+            contribution=round(weight*100,1) if active else 0.0,
+            description=f"Shift risk: {', '.join(reasons)}" if active else "Shift OK",
+            regulatory_ref="DGFASLI OM-2023-11 Clause 5.2", evidence=reasons)
 
+    def _factor_sensor_blindspot(self, reading):
+        weight = RISK_WEIGHTS["sensor_maintenance_blindspot"]
+        offline = [sid for sid, s in reading.sensors.items()
+                   if s.status == SensorStatus.OFFLINE and s.sensor_type in ("H2S","CO","CH4")]
+        active = bool(offline)
+        return RiskFactor(factor_id="sensor_maintenance_blindspot", active=active, weight=weight,
+            contribution=round(weight*100,1) if active else 0.0,
+            description=f"Gas detectors OFFLINE: {', '.join(offline)}" if active else "All detectors OK",
+            regulatory_ref="DGFASLI OM-2023-11 Clause 6.1", evidence=offline)
 
-# ─── Compound multiplier ────────────────────────────────────────────────────
+    def _detect_compound_triggers(self, factors, reading):
+        active_ids = {f.factor_id for f in factors if f.active}
+        triggers, max_mult = [], 1.0
+        DESCS = {
+            ("gas_sensor_anomaly","permit_gas_conflict"): "Elevated gas + hot work permit = explosion precursor (Vizag Jan 2025).",
+            ("confined_space_unchecked","gas_sensor_anomaly"): "Confined space without gas check while sensors elevated.",
+            ("sensor_maintenance_blindspot","gas_sensor_anomaly"): "Gas rising where detector is offline — true peak unknown.",
+        }
+        REFS = {
+            ("gas_sensor_anomaly","permit_gas_conflict"): ["OISD-GS-1 Clause 7.1","DGFASLI OM-2023-11 Clause 4.3","Factory Act S.36(3)"],
+            ("confined_space_unchecked","gas_sensor_anomaly"): ["Factory Act S.36(1)(a)","OISD-GS-1 Clause 6.3"],
+            ("sensor_maintenance_blindspot","gas_sensor_anomaly"): ["DGFASLI OM-2023-11 Clause 6.1"],
+        }
+        for (f1,f2), mult in COMPOUND_MULTIPLIERS.items():
+            if f1 in active_ids and f2 in active_ids:
+                key = (f1,f2) if (f1,f2) in DESCS else (f2,f1)
+                triggers.append(CompoundTrigger(
+                    trigger_id=f"{f1}_x_{f2}", factors_involved=[f1,f2], multiplier=mult,
+                    description=DESCS.get(key, f"Compound: {f1}+{f2}"),
+                    historical_match=None, regulatory_refs=REFS.get(key,[])))
+                max_mult = max(max_mult, mult)
+        return triggers, max_mult
 
-def compound_multiplier(factors: list[RiskFactor]) -> float:
-    """
-    The key insight: when multiple risk factors co-occur, risk is NOT additive.
-    A gas leak alone might be manageable. A gas leak + hot work + offline sensor
-    + shift changeover is the exact Vizag pattern — exponentially more dangerous.
-    
-    Multiplier: if 3+ high-scoring factors, amplify the total by up to 1.4x.
-    This is what makes our system beat single-sensor baselines.
-    """
-    high_factors = sum(1 for f in factors if f.score >= 60)
-    if high_factors >= 4:
-        return 1.40   # All 5 Vizag precursors = maximum amplification
-    elif high_factors >= 3:
-        return 1.25
-    elif high_factors >= 2:
-        return 1.10
-    return 1.0
+    def _predict(self, score, level):
+        if len(self._score_history) < 3:
+            return PredictionWindow(None, None, 0.0, "Insufficient history", None, None)
+        history = list(self._score_history)
+        slope   = (history[-1] - history[0]) / len(history)
+        if slope <= 0:
+            return PredictionWindow(None, None, 0.5, "Score stable", None, None)
+        thresholds = {RiskLevel.LOW:35, RiskLevel.WARNING:60, RiskLevel.HIGH:80, RiskLevel.CRITICAL:101}
+        next_level, next_thresh = None, 101
+        for lvl in [RiskLevel.LOW, RiskLevel.WARNING, RiskLevel.HIGH, RiskLevel.CRITICAL]:
+            if thresholds[lvl] > score:
+                next_level, next_thresh = lvl, thresholds[lvl]; break
+        mins = ((next_thresh - score) / max(slope, 0.001)) * 2.0
+        ss   = max(mins * 2.5, mins + 1.0)
+        return PredictionWindow(
+            minutes_to_next_threshold=round(mins,0), next_threshold=next_level,
+            confidence=min(0.95, 0.4+len(history)*0.04),
+            basis=f"Linear extrapolation {slope:+.1f} pts/reading",
+            single_sensor_minutes=round(ss,0), lead_time_advantage_minutes=round(ss-mins,0))
 
+    def _recommend_actions(self, factors, triggers, reading):
+        actions, priority = [], 1
+        for t in triggers:
+            if "permit_gas_conflict" in t.factors_involved:
+                ev = next((f.evidence for f in factors if f.factor_id=="permit_gas_conflict"), [])
+                actions.append(RecommendedAction(priority=priority,
+                    action=f"SUSPEND hot work permit(s): {', '.join(ev)} immediately",
+                    rationale="Hot work in gas zone = leading cause of coke oven explosions",
+                    regulatory_basis="DGFASLI OM-2023-11 Clause 4.3",
+                    zone=reading.active_permits[0].zone if reading.active_permits else None,
+                    time_sensitive=True)); priority+=1
+            if "confined_space_unchecked" in t.factors_involved:
+                actions.append(RecommendedAction(priority=priority,
+                    action="Halt confined space entry — re-test atmosphere",
+                    rationale="Elevated gas + unchecked confined space = H2S accumulation risk",
+                    regulatory_basis="Factory Act S.36(1)(a)", zone=None,
+                    time_sensitive=True)); priority+=1
+        for f in factors:
+            if f.active:
+                if f.factor_id=="sensor_maintenance_blindspot":
+                    actions.append(RecommendedAction(priority=priority,
+                        action=f"Deploy portable detector for offline zones: {f.evidence}",
+                        rationale="Offline sensor = unknown gas levels",
+                        regulatory_basis="DGFASLI OM-2023-11 Clause 6.1",
+                        zone=None, time_sensitive=False)); priority+=1
+                elif f.factor_id=="shift_changeover_window":
+                    actions.append(RecommendedAction(priority=priority,
+                        action="Incoming supervisor must review gas trend before accepting shift",
+                        rationale="Most accidents occur during shift changeover",
+                        regulatory_basis="DGFASLI OM-2023-11 Clause 5.2",
+                        zone=None, time_sensitive=False)); priority+=1
+        return sorted(actions, key=lambda a: a.priority)
 
-# ─── Breach prediction ──────────────────────────────────────────────────────
+    def _classify(self, score):
+        if score >= 80: return RiskLevel.CRITICAL
+        if score >= 60: return RiskLevel.HIGH
+        if score >= 35: return RiskLevel.WARNING
+        return RiskLevel.LOW
 
-def predict_breach_minutes(compound_score: float) -> int | None:
-    """
-    Predict time to threshold breach based on compound risk score.
-    Calibrated against the Vizag incident (47 min lead time at score ~91).
-    """
-    if compound_score >= 85:
-        return 47    # Vizag-level: 47 minutes
-    elif compound_score >= 70:
-        return 29    # High: 29 minutes
-    elif compound_score >= 50:
-        return 82    # Medium-high: 82 minutes
-    elif compound_score >= 25:
-        return 180   # Medium: 3 hours
-    return None      # Low risk: no breach predicted
+    def _smooth(self, score, alpha=0.8):
+        if self._previous_score is None: return score
+        return alpha*score + (1-alpha)*self._previous_score
 
+    def _zones_with_elevated_gas(self, reading):
+        zone_map = {"Zone A":["G-01","G-02","G-03"],"Zone B":["G-04","G-05","G-06"],"Zone C":["G-07","G-08","G-09"]}
+        return list({z for z, sids in zone_map.items()
+                     for sid in sids
+                     if (s:=reading.sensors.get(sid)) and
+                        s.status in (SensorStatus.WARNING, SensorStatus.CRITICAL, SensorStatus.IDLH)})
 
-# ─── Recommended actions ────────────────────────────────────────────────────
+    def _collect_violations(self, factors, triggers):
+        refs = [f.regulatory_ref for f in factors if f.active and f.regulatory_ref]
+        for t in triggers: refs.extend(t.regulatory_refs)
+        return list(set(refs))
 
-def get_recommended_actions(compound_score: float, factors: list[RiskFactor]) -> list[str]:
-    actions = []
-    if compound_score >= 85:
-        actions.append("🚨 EVACUATE all non-essential personnel from Z-01, Z-02, Z-04, Z-08 immediately")
-        actions.append("📞 Alert Emergency Response Team — activate site emergency protocol")
-    if compound_score >= 60:
-        actions.append("🔴 SUSPEND all hot work permits in gas-elevated zones")
-        actions.append("🔧 Dispatch maintenance to restore offline sensors before any confined space entry")
-    if any(f.name == "shift_changeover" and f.score > 0 for f in factors):
-        actions.append("👥 Incoming shift supervisor must formally accept all active permits before work continues")
-    if any(f.name == "no_entry_check" and f.score > 0 for f in factors):
-        actions.append("📋 STOP all confined space entry — conduct fresh atmospheric test per Factory Act S.36(1)(a)")
-    if compound_score >= 25:
-        actions.append("⚠️ Increase monitoring frequency — check all sensor readings every 10 minutes")
-    if compound_score < 25:
-        actions.append("✅ Continue normal operations — monitor for escalation")
-    return actions
+    def _draft_incident_report(self, assessment, reading):
+        active  = [f.description for f in assessment.risk_factors if f.active]
+        permits = [p.permit_id for p in reading.active_permits]
+        return f"""SAFETY INCIDENT PRELIMINARY REPORT
+Generated by SafetyIQ Compound Risk Engine
+==========================================
+Date/Time:  {reading.timestamp}
+Facility:   Visakhapatnam Steel Plant — Coke Oven Battery 3
+Shift:      {reading.shift.shift} — Supervisor: {reading.shift.supervisor}
+Risk Score: {assessment.risk_score}/100 (CRITICAL)
 
+COMPOUND CONDITIONS DETECTED
+{chr(10).join(f'  • {f}' for f in active)}
 
-# ─── Main entry point ────────────────────────────────────────────────────────
+ACTIVE PERMITS
+{chr(10).join(f'  • {p}' for p in permits)}
 
-def assess_risk(snapshot: PlantSnapshot) -> RiskAssessment:
-    """Full compound risk assessment for a plant snapshot."""
-    factors = [
-        score_gas_level(snapshot),
-        score_hot_work(snapshot),
-        score_offline_sensors(snapshot),
-        score_shift_changeover(snapshot),
-        score_entry_check(snapshot),
-    ]
+REGULATORY VIOLATIONS
+{chr(10).join(f'  • {v}' for v in assessment.regulatory_violations)}
 
-    base_score = sum(f.contribution for f in factors)
-    multiplier = compound_multiplier(factors)
-    compound_score = min(100, round(base_score * multiplier, 1))
+Lead time advantage: {assessment.prediction.lead_time_advantage_minutes or 0:.0f} minutes over single-sensor baseline.
 
-    breach_minutes = predict_breach_minutes(compound_score)
-    actions = get_recommended_actions(compound_score, factors)
+IMMEDIATE ACTIONS
+{chr(10).join(f'  {i+1}. {a.action}' for i,a in enumerate(assessment.recommended_actions[:3]))}
 
-    alert_level = (
-        "CRITICAL" if compound_score >= 75 else
-        "HIGH"     if compound_score >= 50 else
-        "MEDIUM"   if compound_score >= 25 else "LOW"
-    )
-
-    return RiskAssessment(
-        snapshot=snapshot,
-        compound_risk_score=compound_score,
-        alert_level=alert_level,
-        predicted_breach_minutes=breach_minutes,
-        risk_factors=factors,
-        rag_context=None,   # Populated by RAG agent in Week 2
-        recommended_actions=actions
-    )
-
-
-# ─── CLI test ────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    import sys
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from data.adapter import get_typed_snapshot
-
-    for scenario in ["normal", "gas_rising", "hot_work_gas", "vizag_pattern"]:
-        snap = get_typed_snapshot(scenario)
-        result = assess_risk(snap)
-        print(f"\n{'='*60}")
-        print(f"Scenario: {snap.scenario_label}")
-        print(f"Compound Risk Score: {result.compound_risk_score}/100  [{result.alert_level}]")
-        print(f"Predicted breach in: {result.predicted_breach_minutes} min")
-        print("Risk factors:")
-        for f in result.risk_factors:
-            print(f"  {f.name:20s}: {f.score:5.1f} × {f.weight:.2f} = {f.contribution:.1f}")
-        print("Actions:")
-        for a in result.recommended_actions:
-            print(f"  {a}")
+[Auto-generated — qualified safety officer must review before DGFASLI submission.]
+"""

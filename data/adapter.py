@@ -1,14 +1,12 @@
 """
-SafetyIQ — simulator → PlantReading adapter
+SafetyIQ — adapter
+Converts simulator JSON dict → typed PlantReading dataclass.
 Member 2 owns this file.
 
-Converts the raw simulator dict into typed dataclasses
-so Member 1's risk engine can consume it.
-
-Usage:
-    from data.adapter import to_plant_reading
-    reading = to_plant_reading(sim.full_snapshot())
-    assessment = risk_engine.assess(reading)
+Exposes TWO function names so both calling styles work:
+  parse_plant_reading(raw)  ← Member 1's tests use this
+  to_plant_reading(raw)     ← Member 2's backend uses this
+Both do exactly the same thing.
 """
 
 import sys, os
@@ -20,47 +18,42 @@ from agents.interfaces import (
 )
 
 
-def _sensor_status(raw: str) -> SensorStatus:
-    try:    return SensorStatus(raw)
-    except: return SensorStatus.NORMAL
-
-
-def _permit_type(raw: str) -> PermitType:
-    try:    return PermitType(raw)
-    except: return PermitType.GENERAL
-
-
-def to_plant_reading(raw: dict) -> PlantReading:
+def parse_plant_reading(raw: dict) -> PlantReading:
     """Convert simulator full_snapshot() dict → typed PlantReading."""
 
-    sensors = {
-        sid: SensorReading(
+    # ── Sensors ───────────────────────────────────────────────────────────────
+    sensors = {}
+    for sid, s in raw.get("sensors", {}).items():
+        try:    status = SensorStatus(s.get("status", "NORMAL"))
+        except: status = SensorStatus.NORMAL
+        sensors[sid] = SensorReading(
             sensor_id          = sid,
             sensor_type        = s.get("type", "UNKNOWN"),
             value              = s.get("value"),
             unit               = s.get("unit", ""),
-            status             = _sensor_status(s.get("status", "NORMAL")),
+            status             = status,
             threshold_warning  = float(s.get("threshold_warning", 0)),
             threshold_critical = float(s.get("threshold_critical", 0)),
             regulatory_ref     = s.get("regulatory_ref", ""),
         )
-        for sid, s in raw.get("sensors", {}).items()
-    }
 
-    permits = [
-        PermitRecord(
-            permit_id       = p.get("permit_id", "UNKNOWN"),
-            permit_type     = _permit_type(p.get("type", "GENERAL")),
+    # ── Permits ───────────────────────────────────────────────────────────────
+    permits = []
+    for p in raw.get("permits", []):
+        try:    ptype = PermitType(p.get("type", "GENERAL"))
+        except: ptype = PermitType.GENERAL
+        permits.append(PermitRecord(
+            permit_id       = p.get("permit_id", ""),
+            permit_type     = ptype,
             zone            = p.get("zone", ""),
             description     = p.get("description", ""),
             issued_at       = p.get("issued_at", ""),
             valid_until     = p.get("valid_until", ""),
             risk_flag       = bool(p.get("risk_flag", False)),
             conflict_reason = p.get("conflict_reason"),
-        )
-        for p in raw.get("permits", [])
-    ]
+        ))
 
+    # ── Shift ─────────────────────────────────────────────────────────────────
     sl = raw.get("shift_log", {})
     shift = ShiftContext(
         shift                      = sl.get("shift", "A"),
@@ -81,3 +74,7 @@ def to_plant_reading(raw: dict) -> PlantReading:
         shift           = shift,
         raw_alerts      = raw.get("alerts", []),
     )
+
+
+# Alias — Member 2's backend calls this name
+to_plant_reading = parse_plant_reading
