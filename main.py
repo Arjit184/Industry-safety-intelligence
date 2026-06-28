@@ -30,6 +30,11 @@ from data.simulator import SensorSimulator
 from data.adapter import to_plant_reading
 
 app = FastAPI(title="SafetyIQ API", version="1.0.0")
+
+# Scenario name aliases — maps frontend names to backend names
+SCENARIO_ALIASES = {
+    "hot_work_gas": "hot_work_conflict",  # Member 3 uses this name
+}
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 _connections: Dict[str, Set[WebSocket]] = {}
@@ -48,7 +53,12 @@ def _process(raw: dict, engine=None) -> dict:
     if engine:
         reading    = to_plant_reading(raw)
         assessment = engine.assess(reading)
-        return assessment.to_dict()
+        payload    = assessment.to_dict()
+        payload["sensors"]        = raw.get("sensors", {})
+        payload["active_permits"] = raw.get("permits", [])
+        payload["shift"]          = raw.get("shift_log", {})
+        payload["scenario"]       = raw.get("scenario", "")
+        return payload
     return raw
 
 
@@ -81,6 +91,7 @@ def list_scenarios():
 @app.get("/assessment/{scenario}")
 @app.get("/api/snapshot/{scenario}")     # alias kept for compatibility
 def get_assessment(scenario: str):
+    scenario = SCENARIO_ALIASES.get(scenario, scenario)
     if scenario not in INCIDENT_SCENARIOS:
         return {"error": f"Unknown scenario '{scenario}'",
                 "valid": list(INCIDENT_SCENARIOS.keys())}
@@ -157,6 +168,7 @@ async def stream(websocket: WebSocket, scenario: str):
     Live stream — one reading every 2 real seconds (10× sim time).
     Frontend: const ws = new WebSocket('ws://localhost:8000/ws/stream/vizag_pattern')
     """
+    scenario = SCENARIO_ALIASES.get(scenario, scenario)
     if scenario not in INCIDENT_SCENARIOS:
         await websocket.close(code=4004, reason=f"Unknown scenario: {scenario}")
         return
