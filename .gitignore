@@ -2,8 +2,6 @@
 venv/
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
 .pytest_cache/
 
 # Node
@@ -18,7 +16,7 @@ dist-ssr/
 # Vercel
 .vercel/
 
-# ChromaDB
+# Chroma
 data/chroma_db/
 
 # IDE
