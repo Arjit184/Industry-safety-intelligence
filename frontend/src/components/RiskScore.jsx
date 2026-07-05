@@ -1,15 +1,34 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 
 const COLORS = { LOW:"#22c55e", WARNING:"#f59e0b", HIGH:"#f97316", CRITICAL:"#ef4444" };
 
 export default function RiskScore({ assessment }) {
   const { risk_score, risk_level, previous_score, prediction } = assessment;
   const color = COLORS[risk_level] || "#888";
-  const diff = risk_score - previous_score;
+  const diff = previous_score != null ? Math.round(risk_score - previous_score) : 0;
   const trend = diff > 0 ? `▲ ${diff} pts` : diff < 0 ? `▼ ${Math.abs(diff)} pts` : "— no change";
   const trendColor = diff > 0 ? "#ef4444" : "#22c55e";
   const radius = 60, circ = 2 * Math.PI * radius;
   const offset = circ - (risk_score / 100) * circ;
+  const [countdown, setCountdown] = useState(
+  prediction.minutes_to_next_threshold
+);
+
+useEffect(() => {
+  setCountdown(prediction.minutes_to_next_threshold);
+}, [prediction.minutes_to_next_threshold]);
+
+useEffect(() => {
+  if (countdown == null || countdown <= 0) return;
+
+  const timer = setInterval(() => {
+    setCountdown(c =>
+      Math.max(0, parseFloat((c - 1 / 60).toFixed(1)))
+    );
+  }, 1000);
+
+  return () => clearInterval(timer);
+}, [countdown]);
 
   return (
     <div style={{ background:"#111827", borderRadius:16, padding:20, textAlign:"center",
@@ -19,6 +38,18 @@ export default function RiskScore({ assessment }) {
       <p style={{ color:"#6b7280", fontSize:11, margin:"0 0 10px", letterSpacing:2, textTransform:"uppercase" }}>
         Compound Risk Score
       </p>
+      {countdown > 0 && (
+  <p
+    style={{
+      color: "#f59e0b",
+      fontSize: 12,
+      margin: "4px 0 10px",
+      fontWeight: 600,
+    }}
+  >
+    ⏱ Breach in {Math.round(countdown)}m
+  </p>
+)}
       <svg width="160" height="160" viewBox="0 0 160 160" style={{ display:"block", margin:"0 auto" }}>
         <circle cx="80" cy="80" r={radius} fill="none" stroke="#1f2937" strokeWidth="14"/>
         <circle cx="80" cy="80" r={radius} fill="none" stroke={color} strokeWidth="14"

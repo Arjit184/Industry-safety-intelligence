@@ -58,6 +58,27 @@ def _process(raw: dict, engine=None) -> dict:
         payload["active_permits"] = raw.get("permits", [])
         payload["shift"]          = raw.get("shift_log", {})
         payload["scenario"]       = raw.get("scenario", "")
+
+        # Wire in RAG context — only query when risk is elevated
+        if payload.get("risk_level") in ("WARNING", "HIGH", "CRITICAL"):
+            try:
+                from agents.rag_agent import query_rag
+                alerts      = [a.get("message", "") for a in raw.get("alerts", [])[:3]]
+                permits     = [p.get("permit_id", "") for p in raw.get("permits", [])]
+                offline     = [sid for sid, s in raw.get("sensors", {}).items()
+                               if s.get("status") == "OFFLINE"]
+                plant_state = (
+                    f"Gas alerts: {', '.join(alerts)}. "
+                    f"Active permits: {', '.join(permits)}. "
+                    f"Offline sensors: {', '.join(offline)}. "
+                    f"Risk level: {payload['risk_level']}."
+                )
+                rag_result = query_rag(plant_state)
+                if rag_result:
+                    payload["rag_context"] = rag_result
+            except Exception:
+                pass  # keeps streaming even if RAG fails
+
         return payload
     return raw
 
