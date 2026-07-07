@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: safetyiq-backend
+    env: python
+    region: singapore
+    plan: free
+    buildCommand: |
+      pip install -r requirements.txt &&
+      python3 data/corpus_builder.py &&
+      python3 data/embed_corpus.py
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.11.0
