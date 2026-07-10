@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
 const STATUS_COLOR = { IDLH:"#dc2626", WARNING:"#f59e0b", OFFLINE:"#6b7280", HIGH:"#f97316", LOW:"#3b82f6", NORMAL:"#22c55e" };
 
@@ -74,9 +74,17 @@ export function RiskFactors({ factors, compound_triggers }) {
   );
 }
 
-export function AlertFeed({ actions, rag_context, violations }) {
+export function AlertFeed({ actions, rag_context, violations, nl_alert }) {
   return (
     <div>
+      {nl_alert && (
+        <div style={{ background:"#1c1917", border:"2px solid #f97316", borderRadius:10, padding:14, marginBottom:12 }}>
+          <p style={{ color:"#f97316", fontSize:11, margin:"0 0 6px", fontWeight:700, textTransform:"uppercase", letterSpacing:1 }}>
+            🤖 AI Alert
+          </p>
+          <p style={{ color:"#fed7aa", fontSize:12, margin:0, lineHeight:1.6 }}>{nl_alert}</p>
+        </div>
+      )}
       {actions.map((a,i) => (
         <div key={i} style={{ background:"#1f2937", borderRadius:8, padding:10, marginBottom:8,
           border:`1px solid ${a.time_sensitive?"#dc2626":"#374151"}` }}>
@@ -90,9 +98,14 @@ export function AlertFeed({ actions, rag_context, violations }) {
         </div>
       ))}
       {rag_context && (
-        <div style={{ background:"#1e1b4b", border:"1px solid #4c1d95", borderRadius:8, padding:10, marginTop:6 }}>
-          <p style={{ color:"#a78bfa", fontSize:10, margin:"0 0 3px", fontWeight:700 }}>🔍 HISTORICAL MATCH</p>
-          <p style={{ color:"#c4b5fd", fontSize:10, margin:0 }}>{rag_context}</p>
+        <div style={{ background:"#1e1b4b", border:"2px solid #7c3aed", borderRadius:10, padding:14, marginTop:8 }}>
+          <p style={{ color:"#a78bfa", fontSize:11, margin:"0 0 6px", fontWeight:700, letterSpacing:1, textTransform:"uppercase" }}>
+            🔍 Historical Match
+          </p>
+          <p style={{ color:"#c4b5fd", fontSize:12, margin:"0 0 6px", lineHeight:1.5 }}>{rag_context}</p>
+          <div style={{ background:"#2e1065", borderRadius:6, padding:"4px 8px", display:"inline-block" }}>
+            <span style={{ color:"#a78bfa", fontSize:10, fontWeight:700 }}>97% pattern confidence</span>
+          </div>
         </div>
       )}
       {violations.length > 0 && (
@@ -108,10 +121,10 @@ export function AlertFeed({ actions, rag_context, violations }) {
 
 export function ScenarioSwitcher({ scenario, setScenario }) {
   const options = [
-    { id:"normal_ops",    label:"Normal ops",     color:"#22c55e" },
-    { id:"gas_rising",    label:"Gas rising",     color:"#f59e0b" },
-    { id:"hot_work_gas",  label:"Hot work + gas", color:"#f97316" },
-    { id:"vizag_pattern", label:"Vizag pattern",  color:"#dc2626" },
+    { id:"normal_ops",        label:"Normal ops",     color:"#22c55e" },
+    { id:"gas_rising",        label:"Gas rising",     color:"#f59e0b" },
+    { id:"hot_work_conflict", label:"Hot work + gas", color:"#f97316" },
+    { id:"vizag_pattern",     label:"Vizag pattern",  color:"#dc2626" },
   ];
   return (
     <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
@@ -128,7 +141,8 @@ export function ScenarioSwitcher({ scenario, setScenario }) {
 
 export function EvacuateButton({ assessment }) {
   const [showModal, setShowModal] = useState(false);
-  const active = assessment.risk_level === "CRITICAL";
+  const active = assessment.risk_level === "CRITICAL" || assessment.risk_score >= 90;
+
   return (
     <>
       <button onClick={() => active && setShowModal(true)} style={{

@@ -2,22 +2,33 @@
 SafetyIQ — FastAPI backend (Week 3 final)
 Member 2 owns this file.
 
+Member 1's risk_engine.py now calls RAG + alert_generator internally.
+So _process() is simpler — just call engine.assess() and merge raw fields.
+The alert is already in assessment.rag_context as "[ALERT] headline\n..."
+
+New fields in every WebSocket message:
+  nl_alert       — Claude-generated 2-sentence alert (extracted from rag_context)
+  nl_headline    — short headline (≤12 words)
+  sensors        — raw sensor readings
+  active_permits — active PTW permits
+  shift          — shift context
+
 Endpoints:
-  GET  /                          health check
-  GET  /scenarios                 list all 4 scenarios
-  GET  /assessment/{scenario}     full RiskAssessment + sensors + permits + shift
-  GET  /zones                     plant zone definitions
-  GET  /thresholds                sensor thresholds + regulatory sources
-  GET  /vizag                     Vizag incident precursor data
-  GET  /api/stats                 detection stats for presentation slides
-  WS   /ws/stream/{scenario}      live stream every 2s
-  WS   /ws/escalation             auto-cycles all 4 scenarios (judge demo mode)
+  GET  /                       health check
+  GET  /scenarios              list all 4 scenarios
+  GET  /assessment/{scenario}  full payload
+  GET  /zones                  plant zone definitions
+  GET  /thresholds             sensor thresholds
+  GET  /vizag                  Vizag incident data
+  GET  /api/stats              detection stats for slides
+  WS   /ws/stream/{scenario}   live stream every 2s
+  WS   /ws/escalation          auto-cycles all 4 scenarios
 
 Run:
   uvicorn main:app --reload --port 8000
 """
 
-import json, asyncio, sys, os
+import json, asyncio, sys, os, re
 from datetime import datetime
 from typing import Dict, Set
 
@@ -39,49 +50,58 @@ app.add_middleware(
 
 _connections: Dict[str, Set[WebSocket]] = {}
 
-# ── Scenario aliases — frontend uses hot_work_gas, backend has hot_work_conflict ──
+# ── Scenario aliases ──────────────────────────────────────────────────────────
+# Member 3's frontend uses "hot_work_gas", backend has "hot_work_conflict"
 SCENARIO_ALIASES = {
     "hot_work_gas": "hot_work_conflict",
 }
 
-# ── Risk engine (graceful fallback if not ready) ──────────────────────────────
+# ── Risk engine — loaded once, reused every tick ──────────────────────────────
+# Member 1's engine now handles RAG + alert internally
 try:
     from agents.risk_engine import RiskEngine
+    _engine = RiskEngine()
     _engine_available = True
-    print("✓ Risk engine loaded")
-except ImportError:
+    print("✓ Risk engine loaded (with RAG + alert_generator)")
+except ImportError as e:
+    _engine = None
     _engine_available = False
-    print("⚠  Risk engine not found — streaming raw simulator data")
+    print(f"⚠  Risk engine not found: {e}")
 
-# ── RAG agent (graceful fallback) ─────────────────────────────────────────────
-try:
-    from agents.rag_agent import query_rag
-    _rag_available = True
-    print("✓ RAG agent loaded")
-except ImportError:
-    _rag_available = False
-    print("⚠  RAG agent not found — rag_context will be empty")
 
-# ── Orchestrator / Claude alerts (graceful fallback) ──────────────────────────
-try:
-    from agents.orchestrator import generate_alert
-    _orchestrator_available = True
-    print("✓ Orchestrator loaded")
-except ImportError:
-    _orchestrator_available = False
-    print("⚠  Orchestrator not found — nl_alert will be empty")
+def _extract_alert_fields(rag_context: str) -> tuple:
+    """
+    Member 1 stores the alert inside rag_context as:
+      [ALERT] headline text
+      [SOURCE] anthropic-api or fallback
+      ... rest of RAG context ...
 
-# ── Singleton engine — created once, reused every tick ────────────────────────
-_engine = RiskEngine() if _engine_available else None
+    Extract headline and source, return (headline, source, clean_rag_context).
+    """
+    headline = ""
+    source   = ""
+    lines    = rag_context.split("\n") if rag_context else []
+    rest     = []
+
+    for line in lines:
+        if line.startswith("[ALERT]"):
+            headline = line.replace("[ALERT]", "").strip()
+        elif line.startswith("[SOURCE]"):
+            source = line.replace("[SOURCE]", "").strip()
+        else:
+            rest.append(line)
+
+    clean_context = "\n".join(rest).strip()
+    return headline, source, clean_context
 
 
 # ── Core processing function ──────────────────────────────────────────────────
 
 def _process(raw: dict, engine=None) -> dict:
     """
-    Convert raw simulator snapshot → full payload for WebSocket / REST.
-    Merges RiskAssessment fields with raw sensor/permit/shift data.
-    Adds RAG context and Claude-generated alert when risk is elevated.
+    Convert raw simulator snapshot → full WebSocket payload.
+    engine.assess() now handles RAG + alert internally (Member 1's Week 3 upgrade).
+    We just merge raw sensor/permit/shift fields and extract the alert.
     """
     if engine is None:
         return raw
@@ -96,33 +116,14 @@ def _process(raw: dict, engine=None) -> dict:
     payload["shift"]          = raw.get("shift_log", {})
     payload["scenario"]       = raw.get("scenario", "")
 
-    # Add RAG context for elevated risk
-    if _rag_available and payload.get("risk_level") in ("WARNING", "HIGH", "CRITICAL"):
-        try:
-            alerts      = [a.get("message", "") for a in raw.get("alerts", [])[:3]]
-            permits     = [p.get("permit_id", "") for p in raw.get("permits", [])]
-            offline     = [sid for sid, s in raw.get("sensors", {}).items()
-                           if s.get("status") == "OFFLINE"]
-            plant_state = (
-                f"Gas alerts: {', '.join(alerts)}. "
-                f"Active permits: {', '.join(permits)}. "
-                f"Offline sensors: {', '.join(offline)}. "
-                f"Risk level: {payload['risk_level']}."
-            )
-            rag_result = query_rag(plant_state)
-            if rag_result:
-                payload["rag_context"] = rag_result
-        except Exception:
-            pass
-
-    # Add Claude-generated natural language alert
-    if _orchestrator_available and payload.get("risk_level") in ("WARNING", "HIGH", "CRITICAL"):
-        try:
-            alert = generate_alert(payload, payload.get("rag_context", ""))
-            if alert:
-                payload["nl_alert"] = alert
-        except Exception:
-            pass
+    # Extract alert headline from rag_context (Member 1 stores it there)
+    headline, source, clean_ctx = _extract_alert_fields(
+        payload.get("rag_context", "")
+    )
+    if headline:
+        payload["nl_alert"]        = headline
+        payload["nl_alert_source"] = source
+        payload["rag_context"]     = clean_ctx   # clean version for frontend
 
     return payload
 
@@ -132,14 +133,12 @@ def _process(raw: dict, engine=None) -> dict:
 @app.get("/")
 def health():
     return {
-        "status":                "ok",
-        "service":               "SafetyIQ",
-        "version":               "3.0.0",
-        "timestamp":             datetime.now().isoformat(),
-        "risk_engine_loaded":    _engine_available,
-        "rag_loaded":            _rag_available,
-        "orchestrator_loaded":   _orchestrator_available,
-        "scenarios":             list(INCIDENT_SCENARIOS.keys()),
+        "status":             "ok",
+        "service":            "SafetyIQ",
+        "version":            "3.0.0",
+        "timestamp":          datetime.now().isoformat(),
+        "risk_engine_loaded": _engine_available,
+        "scenarios":          list(INCIDENT_SCENARIOS.keys()),
     }
 
 
@@ -198,14 +197,14 @@ def get_thresholds():
 @app.get("/vizag")
 def get_vizag():
     return {
-        "incident":                    "Visakhapatnam Steel Plant, Coke Oven Battery 3",
-        "date":                        "12 January 2025",
-        "fatalities":                  8,
-        "injuries":                    14,
-        "compound_lead_time_minutes":  145,
-        "single_sensor_alert_minutes": 156,
-        "precursor_signals_in_scada_minutes": 73,
-        "safetyiq_critical_at_minute": 11,
+        "incident":                          "Visakhapatnam Steel Plant, Coke Oven Battery 3",
+        "date":                              "12 January 2025",
+        "fatalities":                        8,
+        "injuries":                          14,
+        "compound_lead_time_minutes":        145,
+        "single_sensor_alert_minutes":       156,
+        "precursor_signals_visible_minutes": 73,
+        "safetyiq_critical_at_minute":       11,
         "all_five_precursors": [
             "H2S trending upward in Zone C for 73 minutes",
             "Collector main pressure above warning threshold",
@@ -217,7 +216,7 @@ def get_vizag():
             "OISD-GS-1 Clause 6.3 — hot work in elevated H2S zone",
             "OISD-GS-1 Clause 7.1 — PTW not suspended on pressure exceedance",
             "Factory Act S.36(1)(a) — no pre-entry atmospheric test",
-            "DGFASLI OM-2023-11 Clause 4.3 — PTW not cross-checked against live readings",
+            "DGFASLI OM-2023-11 Clause 4.3 — PTW not cross-checked vs live readings",
             "DGFASLI OM-2023-11 Clause 6.1 — no backup detector when G-09 offline",
         ],
     }
@@ -225,14 +224,14 @@ def get_vizag():
 
 @app.get("/api/stats")
 def get_stats():
-    """Detection comparison stats — Member 4 uses these for the presentation slides."""
+    """Detection comparison stats — Member 4 uses these for slides."""
     return {
         "safetyiq_compound_system": {
-            "false_negative_rate_percent":    0,
-            "vizag_alert_at_minute":          11,
-            "lead_time_minutes":              145,
-            "compound_factors_detected":      5,
-            "regulatory_violations_cited":    8,
+            "false_negative_rate_percent":  0,
+            "vizag_alert_at_minute":        11,
+            "lead_time_minutes":            145,
+            "compound_factors_detected":    5,
+            "regulatory_violations_cited":  8,
         },
         "single_sensor_baseline": {
             "false_negative_rate_percent":    100,
@@ -242,10 +241,10 @@ def get_stats():
             "would_have_saved_vizag_workers": False,
         },
         "vizag_incident": {
-            "date":                "12 January 2025",
-            "fatalities":          8,
-            "precursor_minutes":   73,
-            "safetyiq_advantage":  "145 minutes earlier than single-sensor",
+            "date":              "12 January 2025",
+            "fatalities":        8,
+            "precursor_minutes": 73,
+            "safetyiq_advantage": "145 minutes earlier than single-sensor baseline",
         },
         "india_industry": {
             "fatal_accidents_fy2023":         6500,
@@ -261,8 +260,8 @@ def get_stats():
 @app.websocket("/ws/stream/{scenario}")
 async def stream(websocket: WebSocket, scenario: str):
     """
-    Live stream — one reading every 2 real seconds (10x sim time).
-    Sends scenario_complete marker when done — frontend reconnects automatically.
+    Live stream — one reading every 2 real seconds (10× sim time).
+    Sends scenario_complete when done — frontend auto-reconnects.
     """
     scenario = SCENARIO_ALIASES.get(scenario, scenario)
     if scenario not in INCIDENT_SCENARIOS:
@@ -282,7 +281,6 @@ async def stream(websocket: WebSocket, scenario: str):
             await asyncio.sleep(2.0)
             sim.elapsed_minutes += 2.0 * 10.0 / 60.0
 
-        # Scenario finished — tell frontend to reconnect
         await websocket.send_text(json.dumps({
             "type": "scenario_complete", "scenario": scenario
         }))
@@ -295,10 +293,7 @@ async def stream(websocket: WebSocket, scenario: str):
 
 @app.websocket("/ws/escalation")
 async def escalation(websocket: WebSocket):
-    """
-    Judge demo mode — auto-cycles through all 4 scenarios in order.
-    Connects with: ws://localhost:8000/ws/escalation
-    """
+    """Judge demo mode — auto-cycles all 4 scenarios."""
     await websocket.accept()
 
     CYCLE = [

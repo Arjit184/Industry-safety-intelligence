@@ -1,97 +1,185 @@
 """
-SafetyIQ — RAG agent (Week 3 — sentence-transformers version)
-Queries ChromaDB using semantic embeddings.
-Loaded once, reused forever. Never raises exceptions.
+agents/rag_agent.py
+RAG layer: SentenceTransformer-compatible embeddings + ChromaDB vector store.
 
-Usage:
-    from agents.rag_agent import query_rag
-    context = query_rag("H2S elevated Zone C, hot work permit active")
+Embedding backend: sklearn TF-IDF (L2-normalised, 512-dim) — no HuggingFace
+download needed. Drop-in replaceable with a real SentenceTransformer once
+the environment has internet access; the public API is identical.
 """
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-_collection  = None
-_initialized = False
+import chromadb
+from chromadb.config import Settings
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.preprocessing import normalize
+from typing import List, Dict, Optional
+
+from data.corpus.incidents import INCIDENTS
+
+# ── Module-level singletons ───────────────────────────────────────────────────
+_VECTORIZER: Optional[TfidfVectorizer] = None
+_COLLECTION = None
+_CLIENT = None
+_DIM = 512   # TF-IDF max features → embedding dimensionality
 
 
-def _initialize():
-    global _collection, _initialized
-    if _initialized:
-        return
-    try:
-        import chromadb
-        from chromadb.utils import embedding_functions
-
-        base    = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        db_path = os.path.join(base, "data", "chroma_db")
-
-        if not os.path.exists(db_path):
-            return
-
-        client = chromadb.PersistentClient(path=db_path)
-        ef     = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name="all-MiniLM-L6-v2"
+class _LocalEmbedder:
+    """
+    SentenceTransformer-compatible embedder using TF-IDF + L2 normalisation.
+    Same .encode(texts) → np.ndarray interface as SentenceTransformer.
+    """
+    def __init__(self, dim: int = _DIM):
+        self._dim = dim
+        corpus_texts = [inc["content"] for inc in INCIDENTS]
+        self._vec = TfidfVectorizer(
+            max_features=dim,
+            ngram_range=(1, 2),
+            sublinear_tf=True,
+            strip_accents="unicode",
         )
-        _collection = client.get_collection("safetyiq_corpus", embedding_function=ef)
+        self._vec.fit(corpus_texts)
 
-    except Exception:
-        # ChromaDB not available or corpus not built yet — silent fallback
-        pass
-    finally:
-        _initialized = True
+    def encode(self, texts: List[str], show_progress_bar: bool = False) -> np.ndarray:
+        mat = self._vec.transform(texts).toarray().astype(np.float32)
+        mat = normalize(mat, norm="l2")
+        return mat
 
 
-def query_rag(plant_state: str, n_results: int = 3) -> str:
-    """
-    Query ChromaDB with current plant conditions.
+_EMBEDDER: Optional[_LocalEmbedder] = None
 
-    Args:
-        plant_state : string describing current conditions
-                      e.g. "H2S elevated Zone C, hot work permit PTW-047 active, G-07 offline"
-        n_results   : how many matching chunks to return
 
-    Returns:
-        Human-readable summary for RiskAssessment.rag_context.
-        Empty string on any error.
-    """
-    if not plant_state or not plant_state.strip():
-        return ""
+def _get_embedder() -> _LocalEmbedder:
+    global _EMBEDDER
+    if _EMBEDDER is None:
+        _EMBEDDER = _LocalEmbedder()
+    return _EMBEDDER
 
+
+def _get_collection():
+    global _COLLECTION, _CLIENT
+    if _COLLECTION is not None:
+        return _COLLECTION
+
+    _CLIENT = chromadb.Client(Settings(anonymized_telemetry=False))
+
+    # Delete and recreate so re-runs start clean
     try:
-        _initialize()
-        if _collection is None:
-            return ""
-
-        results   = _collection.query(query_texts=[plant_state], n_results=n_results)
-        docs      = results["documents"][0]
-        metas     = results["metadatas"][0]
-        distances = results["distances"][0]
-
-        parts = []
-        for doc, meta, dist in zip(docs, metas, distances):
-            tag        = meta.get("incident_id") or meta.get("reg_id", "?")
-            similarity = round((1 - dist) * 100)
-            snippet    = doc[:120].strip()
-            if snippet:
-                parts.append(f"[{tag} {similarity}%] {snippet}")
-
-        return " | ".join(parts)
-
+        _CLIENT.delete_collection("safetyiq_incidents")
     except Exception:
+        pass
+
+    col = _CLIENT.create_collection(
+        name="safetyiq_incidents",
+        metadata={"hnsw:space": "cosine"},
+    )
+    _ingest(col)
+    _COLLECTION = col
+    return _COLLECTION
+
+
+def _ingest(collection) -> None:
+    """Embed and store all corpus documents."""
+    embedder = _get_embedder()
+    docs   = [inc["content"] for inc in INCIDENTS]
+    ids    = [inc["id"]      for inc in INCIDENTS]
+    metas  = [
+        {
+            "title":        inc["title"],
+            "severity":     inc["severity"],
+            "casualties":   str(inc["casualties"]),
+            "regulations":  ", ".join(inc["regulations"]),
+            "risk_factors": ", ".join(inc["risk_factors"]),
+            "tags":         ", ".join(inc["tags"]),
+        }
+        for inc in INCIDENTS
+    ]
+    embeddings = embedder.encode(docs).tolist()
+    collection.add(documents=docs, embeddings=embeddings, ids=ids, metadatas=metas)
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
+
+def query(
+    text: str,
+    n_results: int = 3,
+    severity_filter: Optional[str] = None,
+) -> List[Dict]:
+    """
+    Semantic search over incident corpus.
+    Returns list of dicts: id, title, content, distance, metadata.
+    distance is cosine distance (0 = identical, 2 = opposite).
+    similarity = 1 - distance.
+    """
+    embedder   = _get_embedder()
+    collection = _get_collection()
+
+    query_vec = embedder.encode([text]).tolist()
+    where = {"severity": severity_filter} if severity_filter else None
+
+    results = collection.query(
+        query_embeddings=query_vec,
+        n_results=min(n_results, collection.count()),
+        where=where,
+        include=["documents", "metadatas", "distances"],
+    )
+
+    out = []
+    for i in range(len(results["ids"][0])):
+        out.append({
+            "id":       results["ids"][0][i],
+            "title":    results["metadatas"][0][i]["title"],
+            "content":  results["documents"][0][i],
+            "distance": round(results["distances"][0][i], 4),
+            "metadata": results["metadatas"][0][i],
+        })
+    return out
+
+
+def build_rag_context(active_factor_ids: List[str], risk_score: float) -> str:
+    """
+    Builds a context string for the Anthropic alert generator.
+    Returns top-2 most relevant incidents as a formatted string.
+    """
+    if not active_factor_ids:
         return ""
 
+    query_text = " ".join(active_factor_ids).replace("_", " ")
+    if risk_score >= 80:
+        results = query(query_text, n_results=2, severity_filter="CRITICAL")
+        if not results:
+            results = query(query_text, n_results=2)
+    else:
+        results = query(query_text, n_results=2)
 
-if __name__ == "__main__":
-    queries = [
-        "H2S elevated Zone C, hot work permit active, G-07 offline, shift changeover",
-        "confined space entry no pre-entry gas check",
-        "gas accumulation explosion hot work permit grinding",
-        "normal operations all sensors nominal",
-    ]
-    print("RAG agent test\n" + "=" * 50)
-    for q in queries:
-        result = query_rag(q)
-        print(f"\nQ: {q[:70]}")
-        print(f"R: {result[:150] or '(empty)'}")
-    print("\nDone")
+    if not results:
+        return ""
+
+    lines = ["RELEVANT HISTORICAL INCIDENTS:"]
+    for r in results:
+        meta = r["metadata"]
+        sim  = max(0.0, 1.0 - r["distance"])
+        lines.append(
+            f"• {r['title']} | severity={meta['severity']} "
+            f"| casualties={meta['casualties']} | similarity={sim:.0%}"
+        )
+        snippet = r["content"][:300].rsplit(" ", 1)[0] + "…"
+        lines.append(f"  {snippet}")
+        lines.append(f"  Violations: {meta['regulations']}")
+
+    return "\n".join(lines)
+
+
+def match_historical_incident(trigger_id: str) -> Optional[str]:
+    """
+    Returns best matching historical incident ID for a compound trigger.
+    Used to populate CompoundTrigger.historical_match.
+    Threshold: distance < 0.75 (similarity > 25%).
+    """
+    query_text = trigger_id.replace("_x_", " combined with ").replace("_", " ")
+    results = query(query_text, n_results=1)
+    if results and results[0]["distance"] < 0.90:
+        return results[0]["id"]
+    return None
