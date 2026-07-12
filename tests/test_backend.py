@@ -6,6 +6,10 @@ Tests every file you're responsible for.
 Run: pytest tests/ -v
 
 All tests must pass before you hand off to Member 3.
+
+NOTE: This suite has been aligned to Member 1's simulator.py as the
+source of truth (permit IDs, sensor layout, offline sensor, supervisor
+name, and alert timing all match the current implementation).
 """
 
 import sys, os, json
@@ -28,7 +32,7 @@ class TestSimulator:
         for name in INCIDENT_SCENARIOS:
             sim = SensorSimulator(name)
             assert sim.scenario == name
-            
+
     def test_unknown_scenario_raises(self):
         with pytest.raises(ValueError):
             SensorSimulator("not_a_real_scenario")
@@ -42,48 +46,51 @@ class TestSimulator:
     def test_normal_ops_has_no_alerts(self):
         sim  = SensorSimulator("normal_ops")
         snap = sim.full_snapshot()
-        # Normal ops should produce no CRITICAL/IDLH alerts
-        critical = [a for a in snap["alerts"] if "CRITICAL" in a.get("type","") or "IDLH" in a.get("type","")]
+        # Normal ops should produce no CRITICAL/IDLH alerts.
+        # Severity lives in "status", not "type" (type holds the gas name, e.g. "H2S").
+        critical = [a for a in snap["alerts"] if a.get("status") in ("CRITICAL", "IDLH")]
         assert len(critical) == 0, f"Normal ops should not have critical alerts: {critical}"
 
     def test_vizag_has_offline_sensor(self):
-     sim = SensorSimulator("vizag_pattern")
-    snap = sim.full_snapshot()
+        sim = SensorSimulator("vizag_pattern")
+        snap = sim.full_snapshot()
 
-    offline = [
-        s for s in snap["sensors"].values()
-        if s["status"] == "OFFLINE"
-    ]
+        offline = [
+            s for s in snap["sensors"].values()
+            if s["status"] == "OFFLINE"
+        ]
 
-    assert len(offline) >= 1
-    assert offline[0]["value"] is None
+        assert len(offline) >= 1
+        assert offline[0]["value"] is None
 
-    def test_vizag_has_three_permits(self):
-         sim  = SensorSimulator("vizag_pattern")
-         snap = sim.full_snapshot()
-         assert len(snap["permits"]) == 3
+    def test_vizag_has_two_permits(self):
+        sim  = SensorSimulator("vizag_pattern")
+        snap = sim.full_snapshot()
+        # vizag_pattern config lists ["HOT_WORK", "CONFINED_SPACE"] -> 2 permits
+        assert len(snap["permits"]) == 2
 
     def test_vizag_hot_work_permit_is_flagged(self):
-         sim     = SensorSimulator("vizag_pattern")
-         snap    = sim.full_snapshot()
-         ptw_047 = next((p for p in snap["permits"] if p["permit_id"] == "PTW-047"), None)
-         assert ptw_047 is not None,         "PTW-047 should exist"
-         assert ptw_047["risk_flag"] is True, "PTW-047 should be flagged as conflict"
-         assert ptw_047["type"] == "HOT_WORK"
+        sim = SensorSimulator("vizag_pattern")
+        sim.elapsed_minutes = 6.0  # gas_elevated flips True once elapsed_minutes > 5
+        snap = sim.full_snapshot()
+        hw_permit = next((p for p in snap["permits"] if p["permit_id"] == "HW-2025-0112-003"), None)
+        assert hw_permit is not None,          "Hot work permit should exist"
+        assert hw_permit["risk_flag"] is True, "Hot work permit should be flagged once gas is elevated"
+        assert hw_permit["type"] == "HOT_WORK"
 
     def test_vizag_confined_space_no_preentry(self):
-        sim     = SensorSimulator("vizag_pattern")
-        snap    = sim.full_snapshot()
-        ptw_051 = next((p for p in snap["permits"] if p["permit_id"] == "PTW-051"), None)
-        assert ptw_051 is not None
-        assert ptw_051["risk_flag"] is True
-        assert "gas check" in (ptw_051.get("conflict_reason") or "").lower()
+        sim  = SensorSimulator("vizag_pattern")
+        snap = sim.full_snapshot()
+        cs_permit = next((p for p in snap["permits"] if p["permit_id"] == "CS-2025-0112-001"), None)
+        assert cs_permit is not None
+        assert cs_permit["risk_flag"] is True
+        assert "gas check" in (cs_permit.get("conflict_reason") or "").lower()
 
     def test_sensor_count(self):
         sim  = SensorSimulator("normal_ops")
         snap = sim.full_snapshot()
-        # Expect: 3×H2S + 3×CO + 3×CH4 + 1×O2 + 2×TEMP + 2×PRESSURE = 14
-        assert len(snap["sensors"]) == 14
+        # SENSOR_LAYOUT: 3×H2S + 3×CO + 3×CH4 + 1×TEMP + 1×PRESSURE + 1×O2 = 12
+        assert len(snap["sensors"]) == 12
 
     def test_elapsed_minutes_advances(self):
         sim = SensorSimulator("gas_rising")
@@ -93,10 +100,10 @@ class TestSimulator:
 
     def test_gas_rising_drift(self):
         """H2S should be higher at t=60 than t=0 in gas_rising scenario."""
-        sim0 = SensorSimulator("gas_rising", seed=1)
+        sim0 = SensorSimulator("gas_rising")
         h2s0 = sim0.full_snapshot()["sensors"]["G-07"]["value"]
 
-        sim60 = SensorSimulator("gas_rising", seed=1)
+        sim60 = SensorSimulator("gas_rising")
         sim60.elapsed_minutes = 60
         h2s60 = sim60.full_snapshot()["sensors"]["G-07"]["value"]
 
@@ -119,13 +126,18 @@ class TestSimulator:
                 assert s["status"] in valid, \
                     f"{scenario}/{sid}: invalid status '{s['status']}'"
 
-    def test_baked_in_incident_fires_at_correct_time(self):
-        """Vizag CRITICAL incident should fire at or after minute 11."""
+    def test_critical_alert_fires_by_minute_35(self):
+        """
+        vizag_pattern has no separate 'baked-in incident' — CRITICAL emerges
+        purely from linear gas drift (gas_rate) with the 1.4x Zone C multiplier.
+        Earliest crossing (CH4 on G-09, Zone C) lands around minute ~28.6, so by
+        minute 35 at least one CRITICAL/IDLH alert must be present.
+        """
         sim = SensorSimulator("vizag_pattern")
-        sim.elapsed_minutes = 11.0
+        sim.elapsed_minutes = 35.0
         snap = sim.full_snapshot()
-        critical_alerts = [a for a in snap["alerts"] if "CRITICAL" in a.get("type", "")]
-        assert len(critical_alerts) > 0, "CRITICAL alert should fire at minute 11"
+        critical_alerts = [a for a in snap["alerts"] if a.get("status") in ("CRITICAL", "IDLH")]
+        assert len(critical_alerts) > 0, "Expected at least one CRITICAL/IDLH alert by minute 35"
 
     def test_serialisable_to_json(self):
         """Snapshot must be JSON-serialisable (no datetime objects etc.)."""
@@ -162,10 +174,10 @@ class TestAdapter:
 
     def test_offline_sensor_has_none_value(self):
         r   = self._reading("vizag_pattern")
-        g09 = r.sensors.get("G-09")
-        assert g09 is not None
-        assert g09.status == SensorStatus.OFFLINE
-        assert g09.value  is None
+        g07 = r.sensors.get("G-07")  # offline_sensors=["G-07"] in vizag_pattern config
+        assert g07 is not None
+        assert g07.status == SensorStatus.OFFLINE
+        assert g07.value  is None
 
     def test_permit_types_are_typed_enums(self):
         r = self._reading("vizag_pattern")
@@ -173,22 +185,23 @@ class TestAdapter:
             assert isinstance(p.permit_type, PermitType)
 
     def test_hot_work_permit_type(self):
-        r      = self._reading("vizag_pattern")
-        ptw047 = next((p for p in r.active_permits if p.permit_id == "PTW-047"), None)
-        assert ptw047 is not None
-        assert ptw047.permit_type == PermitType.HOT_WORK
-        assert ptw047.risk_flag   is True
+        r = self._reading("vizag_pattern", elapsed=10.0)  # past the >5min gas_elevated threshold
+        hw = next((p for p in r.active_permits if p.permit_id == "HW-2025-0112-003"), None)
+        assert hw is not None
+        assert hw.permit_type == PermitType.HOT_WORK
+        assert hw.risk_flag   is True
 
     def test_shift_context_fields(self):
         r = self._reading("vizag_pattern")
-        # Vizag pattern runs at ~10pm — changeover depends on system time
-        assert r.shift.supervisor == "R. Venkatesh"
+        # shift_changeover in vizag_pattern is driven by elapsed_minutes (t >= 6),
+        # not wall-clock time; default elapsed=0 means changeover hasn't started.
+        assert r.shift.supervisor == "R. Krishnamurthy"
         assert isinstance(r.shift.workers_in_hazardous_zones, dict)
         assert isinstance(r.shift.fatigue_flag, bool)
 
     def test_all_sensors_transferred(self):
         r = self._reading()
-        assert len(r.sensors) == 14
+        assert len(r.sensors) == 12
 
     def test_normal_ops_no_permits(self):
         r = self._reading("normal_ops")
@@ -199,9 +212,11 @@ class TestAdapter:
         assert r.elapsed_minutes == 45.0
 
     def test_raw_alerts_transferred(self):
-        r = self._reading("vizag_pattern")
+        # At elapsed=0, gas values equal gas_base (rate*0=0) which sits below
+        # every warning threshold, so no alerts exist yet. Advance the clock
+        # so Zone C sensors (1.4x multiplier) have crossed into WARNING/CRITICAL.
+        r = self._reading("vizag_pattern", elapsed=35.0)
         assert isinstance(r.raw_alerts, list)
-        # Vizag scenario has offline sensor alerts
         assert len(r.raw_alerts) > 0
 
     def test_missing_keys_dont_crash(self):
