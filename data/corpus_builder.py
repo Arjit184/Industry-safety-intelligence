@@ -14,7 +14,8 @@ Real sources to download (all public):
 
 Run:  python3 corpus_builder.py --output data/corpus/
 """
-
+from data.corpus.incidents import INCIDENTS
+from data.corpus.regulations import REGULATIONS
 import json
 import random
 from datetime import datetime, timedelta
